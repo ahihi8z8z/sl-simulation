@@ -1,0 +1,37 @@
+{
+  "simulation": {
+    "duration": 60.0,
+    "seed": 42,
+    "export_mode": 0
+  },
+  "services": [
+    {
+      "service_id": "svc-hello",
+      "arrival_rate": 5.0,
+      "job_size": 0.1,
+      "timeout": 10.0,
+      "memory": 256,
+      "cpu": 1.0,
+      "max_concurrency": 4,
+      "prewarm_count": 1,
+      "idle_timeout": 30.0
+    }
+  ],
+  "cluster": {
+    "nodes": [
+      {
+        "node_id": "node-0",
+        "cpu_capacity": 8.0,
+        "memory_capacity": 8192
+      }
+    ]
+  },
+  "autoscaling": {
+    "enabled": true,
+    "reconcile_interval": 5.0
+  },
+  "monitoring": {
+    "interval": 1.0,
+    "max_history_length": 1000
+  }
+}
