@@ -14,6 +14,8 @@ from serverless_sim.lifecycle.state_machine import OpenWhiskExtendedStateMachine
 from serverless_sim.monitoring.monitor_manager import MonitorManager
 from serverless_sim.export.export_manager import ExportManager
 from serverless_sim.autoscaling.autoscaler import OpenWhiskPoolAutoscaler
+from serverless_sim.controller.base_controller import BaseController
+from serverless_sim.controller.policies.threshold_policy import ThresholdPolicy
 
 
 class SimulationBuilder:
@@ -71,6 +73,20 @@ class SimulationBuilder:
             interval=mon_cfg.get("interval", 1.0),
             max_history=mon_cfg.get("max_history_length", 1000),
         )
+
+        # Controller
+        ctrl_cfg = config.get("controller", {})
+        if ctrl_cfg.get("enabled", False) and ctx.autoscaling_manager is not None:
+            policy = ThresholdPolicy(
+                cpu_high=ctrl_cfg.get("cpu_high", 0.8),
+                cpu_low=ctrl_cfg.get("cpu_low", 0.3),
+                prewarm_max=ctrl_cfg.get("prewarm_max", 10),
+            )
+            ctx.controller = BaseController(
+                ctx,
+                policy=policy,
+                interval=ctrl_cfg.get("interval", 5.0),
+            )
 
         # Export
         export_mode = export_mode_override
