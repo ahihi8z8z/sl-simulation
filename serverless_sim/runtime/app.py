@@ -60,4 +60,13 @@ def run_train(args):
 
 
 def run_infer(args):
-    print(f"[infer] sim-config={args.sim_config} (not yet implemented)")
+    from serverless_sim.rl_agent.infer import run_inference
+
+    run_dir = _create_run_dir(run_name=getattr(args, "run_name", None) or "infer")
+    run_inference(
+        sim_config_path=args.sim_config,
+        gym_config_path=args.gym_config,
+        rl_config_path=args.rl_config,
+        run_dir=run_dir,
+    )
+    print(f"Inference complete. Results in {run_dir}")

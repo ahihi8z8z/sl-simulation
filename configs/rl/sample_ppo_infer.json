@@ -1,0 +1,5 @@
+{
+  "model_path": "logs/run_20260319_020242_train/ppo_serverless",
+  "n_episodes": 2,
+  "seed": 100
+}
