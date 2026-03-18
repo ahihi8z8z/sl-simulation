@@ -1,0 +1,14 @@
+{
+  "step_duration": 5.0,
+  "max_steps": 50,
+  "prewarm_max": 10,
+  "idle_timeout_max": 120.0,
+  "reward": {
+    "drop_penalty": -1.0,
+    "timeout_penalty": -1.0,
+    "cold_start_penalty": -0.1,
+    "latency_penalty": -0.5,
+    "resource_penalty": -0.1,
+    "throughput_reward": 0.1
+  }
+}
