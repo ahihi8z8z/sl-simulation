@@ -23,19 +23,37 @@ class RequestCollector(BaseCollector):
         completed = sum(1 for inv in table.values() if inv.status == "completed")
         dropped = sum(1 for inv in table.values() if inv.dropped)
         timed_out = sum(1 for inv in table.values() if inv.timed_out)
+        cold_starts = sum(1 for inv in table.values() if inv.cold_start and inv.status == "completed")
         in_flight = sum(
             1 for inv in table.values()
             if inv.status in ("queued", "arrived") or
             (inv.execution_start_time is not None and inv.execution_end_time is None)
         )
 
-        return {
+        # Latency percentiles for completed requests
+        latencies = sorted(
+            inv.completion_time - inv.arrival_time
+            for inv in table.values()
+            if inv.status == "completed" and inv.completion_time and inv.arrival_time
+        )
+
+        metrics = {
             "request.total": total,
             "request.completed": completed,
             "request.dropped": dropped,
             "request.timed_out": timed_out,
+            "request.cold_starts": cold_starts,
             "request.in_flight": in_flight,
         }
+
+        if latencies:
+            n = len(latencies)
+            metrics["request.latency_mean"] = sum(latencies) / n
+            metrics["request.latency_p50"] = latencies[n // 2]
+            metrics["request.latency_p95"] = latencies[int(n * 0.95)]
+            metrics["request.latency_p99"] = latencies[int(n * 0.99)]
+
+        return metrics
 
 
 class ClusterCollector(BaseCollector):
@@ -64,7 +82,7 @@ class ClusterCollector(BaseCollector):
 
 
 class LifecycleCollector(BaseCollector):
-    """Collects lifecycle instance metrics (basic version)."""
+    """Collects lifecycle instance metrics per state and per service."""
 
     def collect(self, env_time: float, ctx: SimContext) -> dict[str, float]:
         if ctx.lifecycle_manager is None:
@@ -73,27 +91,55 @@ class LifecycleCollector(BaseCollector):
         total_instances = 0
         warm_instances = 0
         running_instances = 0
+        prewarm_instances = 0
+        evicted_instances = 0
+        per_service: dict[str, dict[str, int]] = {}
 
         for node in ctx.cluster_manager.get_enabled_nodes():
             instances = ctx.lifecycle_manager.get_instances_for_node(node.node_id)
             for inst in instances:
                 if inst.state == "evicted":
+                    evicted_instances += 1
                     continue
                 total_instances += 1
                 if inst.state == "warm":
                     warm_instances += 1
                 elif inst.state == "running":
                     running_instances += 1
+                elif inst.state == "prewarm":
+                    prewarm_instances += 1
 
-        return {
+                # Per-service counts
+                svc_counts = per_service.setdefault(inst.service_id, {"total": 0, "running": 0})
+                svc_counts["total"] += 1
+                if inst.state == "running":
+                    svc_counts["running"] += 1
+
+        metrics = {
             "lifecycle.instances_total": total_instances,
             "lifecycle.instances_warm": warm_instances,
             "lifecycle.instances_running": running_instances,
+            "lifecycle.instances_prewarm": prewarm_instances,
+            "lifecycle.instances_evicted": evicted_instances,
         }
+
+        for svc_id, counts in per_service.items():
+            metrics[f"lifecycle.{svc_id}.instances_total"] = counts["total"]
+            metrics[f"lifecycle.{svc_id}.instances_running"] = counts["running"]
+
+        return metrics
 
 
 class AutoscalingCollector(BaseCollector):
-    """Placeholder for autoscaling metrics (Step 11)."""
+    """Collects autoscaling parameter metrics."""
 
     def collect(self, env_time: float, ctx: SimContext) -> dict[str, float]:
-        return {}
+        if ctx.autoscaling_manager is None:
+            return {}
+
+        metrics = {}
+        for svc_id in ctx.workload_manager.services:
+            metrics[f"autoscaling.{svc_id}.prewarm_target"] = ctx.autoscaling_manager.get_prewarm_count(svc_id)
+            metrics[f"autoscaling.{svc_id}.idle_timeout"] = ctx.autoscaling_manager.get_idle_timeout(svc_id)
+
+        return metrics

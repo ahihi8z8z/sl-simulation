@@ -1,0 +1,71 @@
+{
+  "simulation": {
+    "duration": 30.0,
+    "seed": 42,
+    "export_mode": 1
+  },
+  "services": [
+    {
+      "service_id": "svc-api",
+      "arrival_rate": 10.0,
+      "job_size": 0.05,
+      "timeout": 5.0,
+      "memory": 256,
+      "cpu": 0.5,
+      "max_concurrency": 8,
+      "prewarm_count": 2,
+      "idle_timeout": 30.0
+    },
+    {
+      "service_id": "svc-worker",
+      "arrival_rate": 2.0,
+      "job_size": 1.0,
+      "timeout": 30.0,
+      "memory": 1024,
+      "cpu": 2.0,
+      "max_concurrency": 2,
+      "prewarm_count": 1,
+      "idle_timeout": 60.0
+    },
+    {
+      "service_id": "svc-cron",
+      "arrival_rate": 0.5,
+      "job_size": 0.5,
+      "timeout": 10.0,
+      "memory": 512,
+      "cpu": 1.0,
+      "max_concurrency": 1,
+      "prewarm_count": 0,
+      "idle_timeout": 15.0
+    }
+  ],
+  "cluster": {
+    "nodes": [
+      {
+        "node_id": "node-0",
+        "cpu_capacity": 16.0,
+        "memory_capacity": 32768
+      },
+      {
+        "node_id": "node-1",
+        "cpu_capacity": 8.0,
+        "memory_capacity": 16384
+      }
+    ]
+  },
+  "autoscaling": {
+    "enabled": true,
+    "reconcile_interval": 5.0
+  },
+  "controller": {
+    "enabled": true,
+    "interval": 5.0,
+    "cpu_high": 0.7,
+    "cpu_low": 0.2,
+    "prewarm_max": 5
+  },
+  "monitoring": {
+    "interval": 1.0,
+    "max_history_length": 1000
+  }
+}
