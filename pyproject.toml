@@ -1,0 +1,14 @@
+[project]
+name = "serverless-sim"
+version = "0.1.0"
+description = "SimPy-based serverless system simulator with Gymnasium and Stable-Baselines3"
+requires-python = ">=3.10"
+dependencies = [
+    "simpy>=4.0",
+    "gymnasium>=0.29",
+    "stable-baselines3>=2.0",
+    "numpy>=1.24",
+]
+
+[project.scripts]
+serverless-sim = "serverless_sim.runtime.cli:main"
