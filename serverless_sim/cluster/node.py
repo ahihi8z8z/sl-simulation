@@ -87,8 +87,17 @@ class Node:
                 self.env.process(self._process_request(invocation))
 
     def _process_request(self, invocation):
-        """SimPy process: find/create instance → execute → complete."""
+        """SimPy process: find/create instance → execute → complete.
+
+        Races execution against a timeout measured from arrival_time.
+        """
         lm = self._ctx.lifecycle_manager
+
+        # Check if already timed out before we even start
+        remaining = invocation.timeout - (self.env.now - invocation.arrival_time)
+        if remaining <= 0:
+            self._timeout_invocation(invocation, lm)
+            return
 
         # Try to find a warm reusable instance
         instance = lm.find_reusable_instance(self, invocation.service_id)
@@ -96,7 +105,22 @@ class Node:
 
         if instance is None:
             # Cold start: create new instance and wait for it to be ready
-            instance = yield lm.prepare_instance_for_service(self, invocation.service_id)
+            # Race cold start against timeout
+            cold_start_proc = lm.prepare_instance_for_service(self, invocation.service_id)
+            remaining = invocation.timeout - (self.env.now - invocation.arrival_time)
+            timeout_event = self.env.timeout(max(remaining, 0))
+            result = yield cold_start_proc | timeout_event
+            if cold_start_proc not in result:
+                # Timeout during cold start
+                self._timeout_invocation(invocation, lm)
+                return
+            instance = result[cold_start_proc]
+
+        # Check timeout again after cold start
+        remaining = invocation.timeout - (self.env.now - invocation.arrival_time)
+        if remaining <= 0:
+            self._timeout_invocation(invocation, lm)
+            return
 
         # Acquire concurrency slot
         req = instance.slots.request()
@@ -107,25 +131,56 @@ class Node:
         if cold_start:
             invocation.cold_start = True
 
-        # Compute service time and simulate execution
+        # Compute service time and race against timeout
         service_time = self.serving_model.estimate_service_time(
             invocation.job_size, self
         )
-        yield self.env.timeout(service_time)
+        remaining = invocation.timeout - (self.env.now - invocation.arrival_time)
 
-        # Finish execution
-        lm.finish_execution(instance, invocation)
+        exec_event = self.env.timeout(service_time)
+        timeout_event = self.env.timeout(max(remaining, 0))
 
-        # Release concurrency slot
-        instance.slots.release(req)
+        result = yield exec_event | timeout_event
+        if exec_event in result:
+            # Normal completion
+            lm.finish_execution(instance, invocation)
+            instance.slots.release(req)
+            self.logger.debug(
+                "t=%.3f | %s | completed %s (cold=%s, duration=%.3f)",
+                self.env.now,
+                self.node_id,
+                invocation.request_id,
+                cold_start,
+                service_time,
+            )
+        else:
+            # Timeout during execution — abort and release resources
+            lm.finish_execution(instance, invocation)
+            instance.slots.release(req)
+            invocation.timed_out = True
+            invocation.drop_reason = "timeout"
+            invocation.status = "timed_out"
+            self.logger.debug(
+                "t=%.3f | %s | TIMEOUT %s (elapsed=%.3f, limit=%.3f)",
+                self.env.now,
+                self.node_id,
+                invocation.request_id,
+                self.env.now - invocation.arrival_time,
+                invocation.timeout,
+            )
 
+    def _timeout_invocation(self, invocation, lm):
+        """Mark invocation as timed out before execution started."""
+        invocation.timed_out = True
+        invocation.dropped = True
+        invocation.drop_reason = "timeout"
+        invocation.status = "timed_out"
+        invocation.completion_time = self.env.now
         self.logger.debug(
-            "t=%.3f | %s | completed %s (cold=%s, duration=%.3f)",
+            "t=%.3f | %s | TIMEOUT (pre-exec) %s",
             self.env.now,
             self.node_id,
             invocation.request_id,
-            cold_start,
-            service_time,
         )
 
     def __repr__(self) -> str:
