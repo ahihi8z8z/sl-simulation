@@ -3,6 +3,8 @@ from datetime import datetime
 
 from serverless_sim.core.config.loader import load_config
 from serverless_sim.core.logging.logger_factory import create_logger
+from serverless_sim.core.simulation.sim_builder import SimulationBuilder
+from serverless_sim.core.simulation.sim_engine import SimulationEngine
 
 
 def _create_run_dir(base: str = "logs", run_name: str | None = None) -> str:
@@ -18,7 +20,6 @@ def _create_run_dir(base: str = "logs", run_name: str | None = None) -> str:
 
 def run_simulate(args):
     config = load_config(args.sim_config)
-
     run_dir = _create_run_dir(run_name=getattr(args, "run_name", None))
 
     logger = create_logger(
@@ -30,15 +31,19 @@ def run_simulate(args):
 
     logger.info("Config loaded successfully from %s", args.sim_config)
     logger.info("Run directory: %s", run_dir)
-    logger.info(
-        "Simulation config: duration=%.1f, seed=%d, services=%d, nodes=%d",
-        config["simulation"]["duration"],
-        config["simulation"]["seed"],
-        len(config["services"]),
-        len(config["cluster"]["nodes"]),
-    )
 
-    # TODO: Step 9 — wire SimulationBuilder + SimulationEngine here
+    # Build
+    export_mode = getattr(args, "export_mode", None)
+    builder = SimulationBuilder()
+    ctx = builder.build(config, run_dir, logger, export_mode_override=export_mode)
+
+    # Run
+    engine = SimulationEngine(ctx)
+    engine.setup()
+    engine.run()
+    engine.shutdown()
+
+    logger.info("Done. Results in %s", run_dir)
 
 
 def run_train(args):
