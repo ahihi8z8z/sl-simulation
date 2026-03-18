@@ -17,6 +17,8 @@ class SimulationEngine:
         self.ctx.cluster_manager.start_all()
         self.ctx.workload_manager.start()
         self.ctx.monitor_manager.start()
+        if self.ctx.autoscaling_manager:
+            self.ctx.autoscaling_manager.start()
         self.ctx.logger.info("SimulationEngine: setup complete")
 
     def run(self, until: float | None = None) -> None:

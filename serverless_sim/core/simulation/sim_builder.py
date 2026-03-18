@@ -13,6 +13,7 @@ from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
 from serverless_sim.lifecycle.state_machine import OpenWhiskExtendedStateMachine
 from serverless_sim.monitoring.monitor_manager import MonitorManager
 from serverless_sim.export.export_manager import ExportManager
+from serverless_sim.autoscaling.autoscaler import OpenWhiskPoolAutoscaler
 
 
 class SimulationBuilder:
@@ -53,6 +54,15 @@ class SimulationBuilder:
 
         # Wire context into nodes
         ctx.cluster_manager.set_context(ctx)
+
+        # Autoscaling
+        auto_cfg = config.get("autoscaling", {})
+        if auto_cfg.get("enabled", False):
+            autoscaler = OpenWhiskPoolAutoscaler(
+                ctx,
+                reconcile_interval=auto_cfg.get("reconcile_interval", 5.0),
+            )
+            ctx.autoscaling_manager = autoscaler
 
         # Monitoring
         mon_cfg = config.get("monitoring", {})
