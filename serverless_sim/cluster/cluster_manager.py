@@ -11,7 +11,7 @@ from serverless_sim.cluster.resource_profile import ResourceProfile
 from serverless_sim.cluster.serving_model import FixedRateModel
 
 if TYPE_CHECKING:
-    pass
+    from serverless_sim.core.simulation.sim_context import SimContext
 
 
 class ClusterManager:
@@ -73,6 +73,11 @@ class ClusterManager:
     def get_node(self, node_id: str) -> Node:
         """Return a node by ID. Raises KeyError if not found."""
         return self.nodes[node_id]
+
+    def set_context(self, ctx: SimContext) -> None:
+        """Set the SimContext on all nodes so they can access lifecycle manager."""
+        for node in self.nodes.values():
+            node._ctx = ctx
 
     def start_all(self) -> None:
         """Start the pull loop on all nodes."""

@@ -10,6 +10,7 @@ from serverless_sim.cluster.serving_model import BaseServingModel
 
 if TYPE_CHECKING:
     from serverless_sim.cluster.compute_class import ComputeClass
+    from serverless_sim.core.simulation.sim_context import SimContext
 
 
 class Node:
@@ -39,6 +40,7 @@ class Node:
         self.queue: simpy.Store = simpy.Store(env)
 
         self.enabled = True
+        self._ctx: SimContext | None = None  # set by ClusterManager when ctx is available
 
     # ------------------------------------------------------------------
     # Resource accounting
@@ -70,10 +72,7 @@ class Node:
         self.env.process(self._pull_loop())
 
     def _pull_loop(self):
-        """Pull requests from the queue and log them.
-
-        In later steps the lifecycle_manager will handle actual execution.
-        """
+        """Pull requests from the queue and process them via lifecycle manager."""
         while True:
             invocation = yield self.queue.get()
             self.logger.debug(
@@ -83,6 +82,51 @@ class Node:
                 invocation.request_id,
                 invocation.service_id,
             )
+            # If lifecycle manager is available, process the request
+            if self._ctx and self._ctx.lifecycle_manager:
+                self.env.process(self._process_request(invocation))
+
+    def _process_request(self, invocation):
+        """SimPy process: find/create instance → execute → complete."""
+        lm = self._ctx.lifecycle_manager
+
+        # Try to find a warm reusable instance
+        instance = lm.find_reusable_instance(self, invocation.service_id)
+        cold_start = instance is None
+
+        if instance is None:
+            # Cold start: create new instance and wait for it to be ready
+            instance = yield lm.prepare_instance_for_service(self, invocation.service_id)
+
+        # Acquire concurrency slot
+        req = instance.slots.request()
+        yield req
+
+        # Start execution
+        lm.start_execution(instance, invocation)
+        if cold_start:
+            invocation.cold_start = True
+
+        # Compute service time and simulate execution
+        service_time = self.serving_model.estimate_service_time(
+            invocation.job_size, self
+        )
+        yield self.env.timeout(service_time)
+
+        # Finish execution
+        lm.finish_execution(instance, invocation)
+
+        # Release concurrency slot
+        instance.slots.release(req)
+
+        self.logger.debug(
+            "t=%.3f | %s | completed %s (cold=%s, duration=%.3f)",
+            self.env.now,
+            self.node_id,
+            invocation.request_id,
+            cold_start,
+            service_time,
+        )
 
     def __repr__(self) -> str:
         return (
