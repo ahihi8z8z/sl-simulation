@@ -1,0 +1,11 @@
+{
+  "n_envs": 2,
+  "total_timesteps": 1000,
+  "use_subproc": false,
+  "learning_rate": 0.0003,
+  "n_steps": 64,
+  "batch_size": 32,
+  "n_epochs": 5,
+  "gamma": 0.99,
+  "model_name": "ppo_serverless"
+}
