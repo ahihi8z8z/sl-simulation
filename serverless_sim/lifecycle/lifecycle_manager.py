@@ -54,7 +54,7 @@ class LifecycleManager:
         return self.ctx.env.process(self._cold_start(node, service_id))
 
     def _cold_start(self, node: Node, service_id: str):
-        """SimPy process: null → prewarm → warm."""
+        """SimPy process: follow path from null → warm using state machine."""
         service = self.ctx.workload_manager.services[service_id]
 
         inst = ContainerInstance(
@@ -71,31 +71,48 @@ class LifecycleManager:
         mem_req = ResourceProfile(cpu=0.0, memory=service.memory)
         node.allocate(mem_req)
 
-        # Transition null → prewarm
-        t1 = self.sm.get_transition("null", "prewarm")
-        if t1 and t1.transition_time > 0:
-            inst.state = "prewarm"
-            inst.state_entered_at = self.ctx.env.now
-            yield self.ctx.env.timeout(t1.transition_time)
+        # Find path from null to warm
+        path = self.sm.find_path("null", "warm")
+        if path is None:
+            path = ["null", "warm"]  # fallback
 
-        # Transition prewarm → warm
-        t2 = self.sm.get_transition("prewarm", "warm")
-        if t2 and t2.transition_time > 0:
-            inst.state = "prewarm"
+        # Walk the path, applying transitions
+        for i in range(len(path) - 1):
+            from_state = path[i]
+            to_state = path[i + 1]
+            td = self.sm.get_transition(from_state, to_state)
+
+            inst.state = from_state
+            inst.target_state = to_state
             inst.state_entered_at = self.ctx.env.now
-            yield self.ctx.env.timeout(t2.transition_time)
+
+            if td:
+                # Allocate transition resources
+                if td.transition_cpu > 0 or td.transition_memory > 0:
+                    trans_res = ResourceProfile(cpu=td.transition_cpu, memory=td.transition_memory)
+                    node.allocate(trans_res)
+
+                # Wait for transition
+                if td.transition_time > 0:
+                    yield self.ctx.env.timeout(td.transition_time)
+
+                # Release transition resources
+                if td.transition_cpu > 0 or td.transition_memory > 0:
+                    node.release(trans_res)
 
         inst.state = "warm"
+        inst.target_state = None
         inst.state_entered_at = self.ctx.env.now
         inst.service_id = service_id
 
         self.logger.debug(
-            "t=%.3f | COLD_START | %s for %s on %s (%.3fs)",
+            "t=%.3f | COLD_START | %s for %s on %s (%.3fs, path=%s)",
             self.ctx.env.now,
             inst.instance_id,
             service_id,
             node.node_id,
             self.ctx.env.now - inst.created_at,
+            "→".join(path),
         )
         return inst
 

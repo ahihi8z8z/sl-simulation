@@ -1,0 +1,53 @@
+{
+  "simulation": {
+    "duration": 30.0,
+    "seed": 42,
+    "export_mode": 2
+  },
+  "services": [
+    {
+      "service_id": "svc-extended",
+      "arrival_rate": 3.0,
+      "job_size": 0.2,
+      "timeout": 15.0,
+      "memory": 512,
+      "cpu": 1.0,
+      "max_concurrency": 4,
+      "prewarm_count": 1,
+      "idle_timeout": 30.0
+    }
+  ],
+  "cluster": {
+    "nodes": [
+      {
+        "node_id": "node-0",
+        "cpu_capacity": 8.0,
+        "memory_capacity": 16384
+      }
+    ]
+  },
+  "lifecycle": {
+    "states": [
+      {"name": "null", "category": "stable"},
+      {"name": "prewarm", "category": "stable", "steady_memory": 0.0},
+      {"name": "code_loaded", "category": "stable", "service_bound": true},
+      {"name": "warm", "category": "stable", "service_bound": true, "reusable": true},
+      {"name": "running", "category": "transient", "service_bound": true, "reusable": false},
+      {"name": "evicted", "category": "stable", "reusable": false}
+    ],
+    "transitions": [
+      {"from": "null", "to": "prewarm", "time": 0.3, "cpu": 0.1},
+      {"from": "prewarm", "to": "code_loaded", "time": 0.4, "cpu": 0.2, "memory": 64},
+      {"from": "code_loaded", "to": "warm", "time": 0.2, "cpu": 0.1},
+      {"from": "warm", "to": "running", "time": 0.0},
+      {"from": "running", "to": "warm", "time": 0.0},
+      {"from": "warm", "to": "evicted", "time": 0.0},
+      {"from": "prewarm", "to": "evicted", "time": 0.0},
+      {"from": "code_loaded", "to": "evicted", "time": 0.0}
+    ]
+  },
+  "monitoring": {
+    "interval": 1.0,
+    "max_history_length": 1000
+  }
+}

@@ -85,3 +85,41 @@ class OpenWhiskExtendedStateMachine:
         sm.add_transition(TransitionDefinition("prewarm", "evicted", transition_time=0.0))
 
         return sm
+
+    @classmethod
+    def from_config(cls, config: dict) -> OpenWhiskExtendedStateMachine:
+        """Build a state machine from config, falling back to default if absent."""
+        lifecycle_cfg = config.get("lifecycle")
+        if not lifecycle_cfg:
+            return cls.default()
+
+        sm = cls()
+
+        for s_cfg in lifecycle_cfg.get("states", []):
+            sd = StateDefinition(
+                state_name=s_cfg["name"],
+                category=s_cfg.get("category", "stable"),
+                steady_cpu=s_cfg.get("steady_cpu", 0.0),
+                steady_memory=s_cfg.get("steady_memory", 0.0),
+                service_bound=s_cfg.get("service_bound", False),
+                reusable=s_cfg.get("reusable", True),
+            )
+            sm.add_state(sd)
+
+        for t_cfg in lifecycle_cfg.get("transitions", []):
+            td = TransitionDefinition(
+                from_state=t_cfg["from"],
+                to_state=t_cfg["to"],
+                transition_time=t_cfg.get("time", 0.0),
+                transition_cpu=t_cfg.get("cpu", 0.0),
+                transition_memory=t_cfg.get("memory", 0.0),
+            )
+            sm.add_transition(td)
+
+        # Validate: ensure we have at least null, warm, running, evicted
+        required = {"null", "warm", "running", "evicted"}
+        missing = required - set(sm.states.keys())
+        if missing:
+            raise ValueError(f"Lifecycle config missing required states: {missing}")
+
+        return sm
