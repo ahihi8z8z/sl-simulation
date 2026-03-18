@@ -80,8 +80,8 @@ class Node:
                 "t=%.3f | %s | received request %s (service=%s)",
                 self.env.now,
                 self.node_id,
-                invocation.get("request_id", "?"),
-                invocation.get("service_id", "?"),
+                invocation.request_id,
+                invocation.service_id,
             )
 
     def __repr__(self) -> str:

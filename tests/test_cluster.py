@@ -124,7 +124,8 @@ class TestNode:
         node = self._make_node(env)
         node.start_pull_loop()
 
-        request = {"request_id": "req-1", "service_id": "svc-a"}
+        from serverless_sim.workload.invocation import Invocation
+        request = Invocation(request_id="req-1", service_id="svc-a")
         env.process(self._put_request(env, node, request))
         env.run(until=1.0)
 
@@ -186,7 +187,8 @@ class TestClusterManager:
         cm = ClusterManager(env=env, config=SAMPLE_CONFIG)
         cm.start_all()
 
-        request = {"request_id": "req-1", "service_id": "svc-a"}
+        from serverless_sim.workload.invocation import Invocation
+        request = Invocation(request_id="req-1", service_id="svc-a")
         node = cm.get_node("node-0")
         env.process(self._put(env, node, request))
         env.run(until=1.0)

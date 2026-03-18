@@ -73,3 +73,7 @@ class PoissonFixedSizeGenerator(BaseGenerator):
                 service.service_id,
                 service.job_size,
             )
+
+            # Dispatch through load balancer if available
+            if ctx.dispatcher is not None:
+                ctx.dispatcher.dispatch(inv)
