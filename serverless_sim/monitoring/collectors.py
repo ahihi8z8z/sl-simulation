@@ -23,6 +23,7 @@ class RequestCollector(BaseCollector):
         completed = sum(1 for inv in table.values() if inv.status == "completed")
         dropped = sum(1 for inv in table.values() if inv.dropped)
         timed_out = sum(1 for inv in table.values() if inv.timed_out)
+        truncated = sum(1 for inv in table.values() if inv.status == "truncated")
         cold_starts = sum(1 for inv in table.values() if inv.cold_start and inv.status == "completed")
         in_flight = sum(
             1 for inv in table.values()
@@ -43,6 +44,7 @@ class RequestCollector(BaseCollector):
             "request.dropped": dropped,
             "request.timed_out": timed_out,
             "request.cold_starts": cold_starts,
+            "request.truncated": truncated,
             "request.in_flight": in_flight,
         }
 

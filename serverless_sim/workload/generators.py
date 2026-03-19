@@ -15,7 +15,7 @@ class BaseGenerator:
     def attach(self, ctx: SimContext) -> None:
         raise NotImplementedError
 
-    def start_for_service(self, service: ServiceClass) -> None:
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
         raise NotImplementedError
 
 
@@ -34,11 +34,17 @@ class PoissonFixedSizeGenerator(BaseGenerator):
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
 
-    def start_for_service(self, service: ServiceClass) -> None:
-        """Kick off the SimPy arrival process for *service*."""
-        self.ctx.env.process(self._arrival_loop(service))
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
+        """Kick off the SimPy arrival process for *service*.
 
-    def _arrival_loop(self, service: ServiceClass):
+        Parameters
+        ----------
+        stop_time : float | None
+            If set, stop generating requests after this simulation time.
+        """
+        self.ctx.env.process(self._arrival_loop(service, stop_time))
+
+    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None):
         """SimPy process: generate requests with exponential inter-arrival."""
         ctx = self.ctx
         rng = ctx.rng
@@ -47,9 +53,23 @@ class PoissonFixedSizeGenerator(BaseGenerator):
         mean_interval = 1.0 / service.arrival_rate
 
         while True:
+            if stop_time is not None and env.now >= stop_time:
+                ctx.logger.debug(
+                    "t=%.3f | GENERATOR_STOP | %s (stop_time=%.1f)",
+                    env.now, service.service_id, stop_time,
+                )
+                return
             # Exponential inter-arrival time
             interval = rng.exponential(mean_interval)
             yield env.timeout(interval)
+
+            # Check again after waiting — time may have crossed stop_time
+            if stop_time is not None and env.now >= stop_time:
+                ctx.logger.debug(
+                    "t=%.3f | GENERATOR_STOP | %s (stop_time=%.1f)",
+                    env.now, service.service_id, stop_time,
+                )
+                return
 
             self._request_counter += 1
             request_id = f"req-{self._request_counter}"

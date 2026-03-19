@@ -23,6 +23,7 @@ class SummaryWriter:
         completed = sum(1 for inv in table.values() if inv.status == "completed")
         dropped = sum(1 for inv in table.values() if inv.dropped)
         timed_out = sum(1 for inv in table.values() if inv.timed_out)
+        truncated = sum(1 for inv in table.values() if inv.status == "truncated")
         cold_starts = sum(1 for inv in table.values() if inv.cold_start and inv.status == "completed")
 
         # Latency stats for completed requests
@@ -46,6 +47,7 @@ class SummaryWriter:
             f.write(f"Completed: {completed}\n")
             f.write(f"Dropped: {dropped}\n")
             f.write(f"Timed out: {timed_out}\n")
+            f.write(f"Truncated: {truncated}\n")
             f.write(f"Cold starts: {cold_starts}\n")
 
             if latencies:

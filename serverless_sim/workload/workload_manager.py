@@ -23,10 +23,16 @@ class WorkloadManager:
         self.services[service.service_id] = service
         self.ctx.logger.info("Registered service: %s (rate=%.1f)", service.service_id, service.arrival_rate)
 
-    def start(self) -> None:
-        """Start arrival generators for all registered services."""
+    def start(self, stop_time: float | None = None) -> None:
+        """Start arrival generators for all registered services.
+
+        Parameters
+        ----------
+        stop_time : float | None
+            If set, generators stop producing requests after this time.
+        """
         for service in self.services.values():
-            self.generator.start_for_service(service)
+            self.generator.start_for_service(service, stop_time=stop_time)
             self.ctx.logger.info("Started generator for service: %s", service.service_id)
 
     @classmethod

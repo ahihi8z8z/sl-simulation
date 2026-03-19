@@ -97,8 +97,8 @@ class TestSimulationEngine:
         engine.run()
         engine.shutdown()
 
-        # Verify simulation actually ran
-        assert ctx.env.now == 5.0
+        # Verify simulation ran past duration (includes drain period)
+        assert ctx.env.now >= 5.0
         assert len(ctx.request_table) > 0
 
     def test_full_run_produces_summary(self):
@@ -150,7 +150,7 @@ class TestSimulationEngine:
         engine.run()
         engine.shutdown()
 
-        assert ctx.env.now == 5.0
+        assert ctx.env.now >= 5.0
         assert len(ctx.request_table) > 0
 
     def test_completed_requests_exist(self):
