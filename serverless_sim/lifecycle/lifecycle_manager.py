@@ -204,6 +204,12 @@ class LifecycleManager:
             self._evicted_count,
         )
 
+        # Notify autoscaler to replenish pool reactively
+        if self.ctx.autoscaling_manager is not None:
+            self.ctx.autoscaling_manager.notify_pool_change(
+                instance.node_id, instance.service_id,
+            )
+
     def get_instances_for_node(self, node_id: str, state: str | None = None) -> list[ContainerInstance]:
         """Get instances on a node, optionally filtered by state."""
         instances = self._get_instances(node_id)

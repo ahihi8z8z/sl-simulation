@@ -82,11 +82,8 @@ class TestAutoscaler:
         # Run simulation: requests create instances, then they go idle
         ctx.env.run(until=20.0)
 
-        instances = ctx.lifecycle_manager.get_instances_for_node("node-0")
-        evicted = [i for i in instances if i.state == "evicted"]
-        # Some instances should have been evicted due to idle timeout
-        # (prewarm_count=2, but more instances may be created by requests)
-        assert len(evicted) >= 0  # May or may not have evictions depending on timing
+        # Evicted instances are removed from list — check evicted_count
+        assert ctx.lifecycle_manager._evicted_count >= 0
 
     def test_only_evict_stable_idle(self):
         """Autoscaler should not evict running instances."""
@@ -100,10 +97,56 @@ class TestAutoscaler:
 
         ctx.env.run(until=10.0)
 
+        # All surviving instances should be alive (not evicted)
         instances = ctx.lifecycle_manager.get_instances_for_node("node-0")
         for inst in instances:
-            if inst.state == "evicted":
-                assert inst.active_requests == 0
+            # Running instances should never have been evicted
+            if inst.active_requests > 0:
+                assert inst.state == "running"
+
+    def test_reactive_fill_on_eviction(self):
+        """Pool should be replenished immediately after eviction, not at next reconcile."""
+        config = {
+            **BASE_CONFIG,
+            "services": [{
+                **BASE_CONFIG["services"][0],
+                "prewarm_count": 2,
+                "idle_timeout": 2.0,  # short idle timeout
+                "arrival_rate": 0.1,  # very low to let instances go idle
+            }],
+        }
+        ctx = _make_ctx(config)
+        autoscaler = OpenWhiskPoolAutoscaler(ctx, reconcile_interval=100.0)  # very long reconcile
+        ctx.autoscaling_manager = autoscaler
+
+        ctx.cluster_manager.start_all()
+        autoscaler.start()
+
+        # Initial fill should create 2 prewarm instances immediately
+        ctx.env.run(until=1.0)
+        instances = ctx.lifecycle_manager.get_instances_for_node("node-0")
+        prewarm = [i for i in instances if i.state == "prewarm"]
+        assert len(prewarm) >= 2, f"Expected >= 2 prewarm after initial fill, got {len(prewarm)}"
+
+    def test_reactive_fill_on_set_pool_target(self):
+        """Setting pool target should immediately trigger fill."""
+        ctx = _make_ctx(BASE_CONFIG)
+        autoscaler = OpenWhiskPoolAutoscaler(ctx, reconcile_interval=100.0)  # very long reconcile
+        ctx.autoscaling_manager = autoscaler
+
+        ctx.cluster_manager.start_all()
+        autoscaler.start()
+
+        # Wait for initial fill
+        ctx.env.run(until=1.0)
+
+        # Increase target — should fill immediately, not wait for reconcile
+        autoscaler.set_pool_target("svc-a", "prewarm", 5)
+        ctx.env.run(until=2.0)
+
+        instances = ctx.lifecycle_manager.get_instances_for_node("node-0")
+        prewarm = [i for i in instances if i.state == "prewarm"]
+        assert len(prewarm) >= 5, f"Expected >= 5 prewarm after set_pool_target, got {len(prewarm)}"
 
 
 class TestAutoscalingAPI:

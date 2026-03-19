@@ -69,6 +69,7 @@ class OpenWhiskPoolAutoscaler:
                 self._pool_targets[svc.service_id].setdefault(first_state, svc.prewarm_count)
 
     def start(self) -> None:
+        self.initial_fill()
         self.ctx.env.process(self._reconcile_loop())
 
     def _reconcile_loop(self):
@@ -77,7 +78,12 @@ class OpenWhiskPoolAutoscaler:
             self.reconcile()
 
     def reconcile(self) -> None:
-        """Run one reconcile cycle across all nodes."""
+        """Run one reconcile cycle across all nodes.
+
+        Reconcile handles eviction only (idle timeout + LRU).
+        Pool top-up is reactive — triggered immediately when an instance
+        is consumed or evicted via ``notify_pool_change()``.
+        """
         now = self.ctx.env.now
         lm = self.ctx.lifecycle_manager
 
@@ -104,26 +110,45 @@ class OpenWhiskPoolAutoscaler:
                 lm.evict_instance(candidates[0])
                 instances = lm.get_instances_for_node(node.node_id)
 
-            # 3. Per-state pool top-up
-            # Each pool is independent — count containers exactly at that state.
-            # Walk from shallowest to deepest so cheaper containers are created first.
-            for svc_id, targets in self._pool_targets.items():
-                for state in self._pool_states:
-                    target = targets.get(state, 0)
-                    if target <= 0:
-                        continue
+    # ------------------------------------------------------------------
+    # Reactive pool top-up
+    # ------------------------------------------------------------------
 
-                    # Count instances exactly at this state
-                    at_state = [
-                        i for i in lm.get_instances_for_node(node.node_id)
-                        if i.service_id == svc_id and i.state == state
-                    ]
-                    deficit = target - len(at_state)
-                    for _ in range(deficit):
-                        service = self.ctx.workload_manager.services[svc_id]
-                        mem_req = ResourceProfile(cpu=0.0, memory=service.memory)
-                        if node.available.can_fit(mem_req):
-                            lm.prepare_instance_for_service(node, svc_id, target_state=state)
+    def notify_pool_change(self, node_id: str, service_id: str) -> None:
+        """Reactively replenish pool targets for *service_id* on *node_id*.
+
+        Called when an instance is consumed (moved to warm/running) or
+        evicted.  Checks each pool state and creates replacement
+        instances if below target.
+        """
+        targets = self._pool_targets.get(service_id, {})
+        if not targets:
+            return
+
+        lm = self.ctx.lifecycle_manager
+        node = self.ctx.cluster_manager.get_node(node_id)
+
+        for state in self._pool_states:
+            target = targets.get(state, 0)
+            if target <= 0:
+                continue
+
+            at_state = [
+                i for i in lm.get_instances_for_node(node_id)
+                if i.service_id == service_id and i.state == state
+            ]
+            deficit = target - len(at_state)
+            for _ in range(deficit):
+                service = self.ctx.workload_manager.services[service_id]
+                mem_req = ResourceProfile(cpu=0.0, memory=service.memory)
+                if node.available.can_fit(mem_req):
+                    lm.prepare_instance_for_service(node, service_id, target_state=state)
+
+    def initial_fill(self) -> None:
+        """Fill all pools to their targets on startup."""
+        for node in self.ctx.cluster_manager.get_enabled_nodes():
+            for svc_id in self._pool_targets:
+                self.notify_pool_change(node.node_id, svc_id)
 
     # ------------------------------------------------------------------
     # Per-state pool target access
@@ -134,7 +159,10 @@ class OpenWhiskPoolAutoscaler:
         return self._pool_targets.get(service_id, {}).get(state, 0)
 
     def set_pool_target(self, service_id: str, state: str, count: int) -> None:
-        """Set pool target for a specific state (must be an intermediate state)."""
+        """Set pool target for a specific state (must be an intermediate state).
+
+        Triggers reactive top-up on all nodes immediately.
+        """
         if state not in self._pool_states:
             self.logger.warning(
                 "Ignoring pool target for '%s' — only intermediate states %s are valid",
@@ -142,6 +170,9 @@ class OpenWhiskPoolAutoscaler:
             )
             return
         self._pool_targets.setdefault(service_id, {})[state] = count
+        # Reactively fill on all nodes
+        for node in self.ctx.cluster_manager.get_enabled_nodes():
+            self.notify_pool_change(node.node_id, service_id)
 
     def get_all_pool_targets(self, service_id: str) -> dict[str, int]:
         """Get all pool targets for a service."""
