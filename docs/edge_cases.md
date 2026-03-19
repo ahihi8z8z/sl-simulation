@@ -176,9 +176,9 @@ Cold start xảy ra khi `find_reusable_instance()` không tìm thấy warm insta
 
 ### Thời gian cold start
 
-Là tổng transition time trên path từ "null" → "warm":
-- Default: 0.5s (null→prewarm) + 0.3s (prewarm→warm) = **0.8s**
-- Extended: tùy config, ví dụ 0.3 + 0.4 + 0.2 = **0.9s** (null→prewarm→code_loaded→warm)
+Là tổng transition time trên cold-start chain (tuyến tính, chỉ có 1 đường duy nhất từ "null" → "warm"):
+- Default chain `["null", "prewarm", "warm"]`: 0.5s + 0.3s = **0.8s**
+- Extended chain `["null", "prewarm", "code_loaded", "warm"]`: 0.3 + 0.4 + 0.2 = **0.9s**
 
 ### Tài nguyên cold start
 

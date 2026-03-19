@@ -160,6 +160,7 @@ Khi `enabled: true`, autoscaler thực hiện 3 việc mỗi reconcile:
 ```json
 {
   "lifecycle": {
+    "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
     "states": [
       {"name": "null", "category": "stable"},
       {"name": "prewarm", "category": "stable", "steady_memory": 0.0},
@@ -182,6 +183,14 @@ Khi `enabled: true`, autoscaler thực hiện 3 việc mỗi reconcile:
 }
 ```
 
+**cold_start_chain:**
+
+| Key | Type | Mặc định | Mô tả |
+|-----|------|----------|-------|
+| `cold_start_chain` | list[str] | tự suy | Danh sách tuyến tính các state từ `"null"` đến `"warm"`. Phải bắt đầu bằng `"null"` và kết thúc bằng `"warm"`. Transitions phải tồn tại giữa mọi cặp liền kề |
+
+Nếu không khai báo `cold_start_chain`, hệ thống tự suy bằng cách đi theo forward transitions từ `null`. Nếu một state có nhiều hơn 1 forward transition (ngoài `running` và `evicted`) → báo lỗi yêu cầu khai báo tường minh.
+
 **State:**
 
 | Key | Type | Mặc định | Mô tả |
@@ -203,9 +212,9 @@ Khi `enabled: true`, autoscaler thực hiện 3 việc mỗi reconcile:
 | `cpu` | float | 0.0 | CPU tạm thời trong quá trình chuyển đổi |
 | `memory` | float | 0.0 | Memory tạm thời trong quá trình chuyển đổi |
 
-Nếu không có section `lifecycle`, hệ thống dùng default state machine:
+Nếu không có section `lifecycle`, hệ thống dùng default chain:
 ```
-null --0.5s--> prewarm --0.3s--> warm --0s--> running --0s--> warm
+null --0.5s--> prewarm --0.3s--> warm
 ```
 
 ---

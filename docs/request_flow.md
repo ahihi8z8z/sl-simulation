@@ -98,7 +98,7 @@ result = yield cold_start_proc | timeout_event
 
 1. Tạo `ContainerInstance(max_concurrency, memory, cpu)`
 2. Allocate memory trên node: `node.allocate(ResourceProfile(cpu=0, memory=service.memory))`
-3. Tìm path từ "null" → "warm" qua state machine (BFS)
+3. Lấy cold-start chain từ state machine (tuyến tính: `null → ... → warm`)
 4. Đi qua từng transition:
    - Allocate transition resources (cpu, memory tạm thời)
    - `yield env.timeout(transition_time)`
