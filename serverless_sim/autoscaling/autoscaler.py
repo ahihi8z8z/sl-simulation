@@ -24,6 +24,9 @@ class OpenWhiskPoolAutoscaler:
         self.logger = ctx.logger
         self.reconcile_interval = reconcile_interval
 
+        # Evictable states from state machine (stable, not null/evicted)
+        self._evictable_states = ctx.lifecycle_manager.sm.get_evictable_states()
+
         # Per-service parameters (can be adjusted by controller/RL)
         self._idle_timeout: dict[str, float] = {}
         self._prewarm_count: dict[str, int] = {}
@@ -51,7 +54,7 @@ class OpenWhiskPoolAutoscaler:
 
             # 1. Evict idle containers past idle_timeout
             for inst in instances:
-                if inst.state in ("warm", "prewarm") and inst.is_idle:
+                if inst.state in self._evictable_states and inst.is_idle:
                     timeout = self._idle_timeout.get(inst.service_id, 60.0)
                     if (now - inst.last_used_at) >= timeout:
                         lm.evict_instance(inst)
@@ -63,7 +66,7 @@ class OpenWhiskPoolAutoscaler:
                 # Find LRU idle stable instance to evict
                 candidates = [
                     i for i in instances
-                    if i.state in ("warm", "prewarm") and i.is_idle
+                    if i.state in self._evictable_states and i.is_idle
                 ]
                 if not candidates:
                     break

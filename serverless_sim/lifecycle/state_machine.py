@@ -74,6 +74,13 @@ class OpenWhiskExtendedStateMachine:
     # Cold-start path
     # ------------------------------------------------------------------
 
+    def get_evictable_states(self) -> set[str]:
+        """Return state names that are stable, idle-evictable (not null/evicted/running)."""
+        return {
+            name for name, sd in self.states.items()
+            if sd.is_stable and name not in ("null", "evicted")
+        }
+
     def get_cold_start_path(self) -> list[str]:
         """Return the linear cold-start chain (null → ... → warm)."""
         return list(self._cold_start_chain)
