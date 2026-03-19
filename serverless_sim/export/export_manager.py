@@ -24,13 +24,13 @@ class ExportManager:
         self.mode = mode
         self.logger = ctx.logger
 
-    def export(self) -> list[str]:
+    def export(self, wall_clock_seconds: float | None = None) -> list[str]:
         """Run all exporters based on mode. Returns list of written file paths."""
         paths = []
 
         # Mode 0+: always write summary
         sw = SummaryWriter(self.ctx)
-        p = sw.write()
+        p = sw.write(wall_clock_seconds=wall_clock_seconds)
         paths.append(p)
         self.logger.info("Wrote %s", p)
 

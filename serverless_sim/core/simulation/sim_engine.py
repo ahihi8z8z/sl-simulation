@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,6 +12,8 @@ class SimulationEngine:
 
     def __init__(self, ctx: SimContext):
         self.ctx = ctx
+        self._wall_start: float | None = None
+        self._wall_end: float | None = None
 
     def setup(self) -> None:
         """Start all SimPy processes."""
@@ -44,7 +47,9 @@ class SimulationEngine:
             "SimulationEngine: running until t=%.1f (drain=%.1f, total=%.1f)",
             until, drain_timeout, total,
         )
+        self._wall_start = time.monotonic()
         self.ctx.env.run(until=total)
+        self._wall_end = time.monotonic()
         self.ctx.logger.info("SimulationEngine: simulation finished at t=%.3f", self.ctx.env.now)
 
     def _get_drain_timeout(self) -> float:
@@ -62,8 +67,11 @@ class SimulationEngine:
     def shutdown(self) -> None:
         """Mark in-flight requests as truncated, then export results."""
         self._mark_truncated()
+        wall_clock = None
+        if self._wall_start is not None and self._wall_end is not None:
+            wall_clock = self._wall_end - self._wall_start
         if self.ctx.export_manager:
-            self.ctx.export_manager.export()
+            self.ctx.export_manager.export(wall_clock_seconds=wall_clock)
         self.ctx.logger.info("SimulationEngine: shutdown complete")
 
     def _mark_truncated(self) -> None:

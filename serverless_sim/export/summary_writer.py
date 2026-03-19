@@ -13,8 +13,14 @@ class SummaryWriter:
     def __init__(self, ctx: SimContext):
         self.ctx = ctx
 
-    def write(self) -> str:
-        """Write summary.txt and return the file path."""
+    def write(self, wall_clock_seconds: float | None = None) -> str:
+        """Write summary.txt and return the file path.
+
+        Parameters
+        ----------
+        wall_clock_seconds : float | None
+            Wall-clock time the simulation took (seconds).
+        """
         run_dir = self.ctx.run_dir
         path = os.path.join(run_dir, "summary.txt")
 
@@ -35,9 +41,14 @@ class SummaryWriter:
         config = self.ctx.config
         duration = config["simulation"]["duration"]
 
+        sim_end_time = self.ctx.env.now
+
         with open(path, "w") as f:
             f.write("=== Simulation Summary ===\n\n")
-            f.write(f"Duration: {duration:.1f}s\n")
+            f.write(f"Duration (config): {duration:.1f}s\n")
+            f.write(f"Simulation end time: {sim_end_time:.1f}s\n")
+            if wall_clock_seconds is not None:
+                f.write(f"Wall-clock time: {wall_clock_seconds:.2f}s\n")
             f.write(f"Seed: {config['simulation']['seed']}\n")
             f.write(f"Services: {len(config['services'])}\n")
             f.write(f"Nodes: {len(config['cluster']['nodes'])}\n\n")
