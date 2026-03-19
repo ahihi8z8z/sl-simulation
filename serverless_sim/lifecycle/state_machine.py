@@ -5,16 +5,25 @@ from serverless_sim.lifecycle.transition_definition import TransitionDefinition
 
 
 class OpenWhiskExtendedStateMachine:
-    """Holds state/transition definitions, computes transition paths.
+    """Holds state/transition definitions with a linear cold-start chain.
 
-    Minimal default graph:
-        null → prewarm → warm → running → warm → evicted
+    The cold-start chain is an ordered list of states from ``null`` to
+    ``warm``.  Transitions only exist between consecutive chain members,
+    plus ``warm ↔ running`` and ``* → evicted``.
+
+    Default chain::
+
+        null → prewarm → warm
+
+    Extended example::
+
+        null → prewarm → code_loaded → warm
     """
 
     def __init__(self):
         self.states: dict[str, StateDefinition] = {}
         self.transitions: dict[tuple[str, str], TransitionDefinition] = {}
-        self._adjacency: dict[str, list[str]] = {}
+        self._cold_start_chain: list[str] = []
 
     # ------------------------------------------------------------------
     # Build helpers
@@ -22,12 +31,38 @@ class OpenWhiskExtendedStateMachine:
 
     def add_state(self, sd: StateDefinition) -> None:
         self.states[sd.state_name] = sd
-        self._adjacency.setdefault(sd.state_name, [])
 
     def add_transition(self, td: TransitionDefinition) -> None:
         key = (td.from_state, td.to_state)
         self.transitions[key] = td
-        self._adjacency.setdefault(td.from_state, []).append(td.to_state)
+
+    def set_cold_start_chain(self, chain: list[str]) -> None:
+        """Set the linear cold-start chain and validate it.
+
+        The chain must start with ``"null"`` and end with ``"warm"``.
+        Every state in the chain must be registered, and transitions
+        must exist between each consecutive pair.
+        """
+        if len(chain) < 2:
+            raise ValueError("Cold-start chain must have at least 2 states (null → warm)")
+        if chain[0] != "null":
+            raise ValueError(f"Cold-start chain must start with 'null', got '{chain[0]}'")
+        if chain[-1] != "warm":
+            raise ValueError(f"Cold-start chain must end with 'warm', got '{chain[-1]}'")
+
+        for state_name in chain:
+            if state_name not in self.states:
+                raise ValueError(f"Chain state '{state_name}' not found in registered states")
+
+        for i in range(len(chain) - 1):
+            key = (chain[i], chain[i + 1])
+            if key not in self.transitions:
+                raise ValueError(
+                    f"Missing transition {chain[i]} → {chain[i+1]} "
+                    f"(required by cold_start_chain)"
+                )
+
+        self._cold_start_chain = list(chain)
 
     def get_transition(self, from_state: str, to_state: str) -> TransitionDefinition | None:
         return self.transitions.get((from_state, to_state))
@@ -36,33 +71,40 @@ class OpenWhiskExtendedStateMachine:
         return self.states.get(name)
 
     # ------------------------------------------------------------------
-    # Path finding (BFS)
+    # Cold-start path
     # ------------------------------------------------------------------
+
+    def get_cold_start_path(self) -> list[str]:
+        """Return the linear cold-start chain (null → ... → warm)."""
+        return list(self._cold_start_chain)
 
     def find_path(self, from_state: str, to_state: str) -> list[str] | None:
-        """Return the shortest state path (including endpoints), or None."""
+        """Return the sub-chain between *from_state* and *to_state*.
+
+        Only supports states within the cold-start chain.  Returns
+        ``None`` if either state is not in the chain or *from_state*
+        comes after *to_state*.
+        """
         if from_state == to_state:
             return [from_state]
-        visited = {from_state}
-        queue = [[from_state]]
-        while queue:
-            path = queue.pop(0)
-            current = path[-1]
-            for neighbor in self._adjacency.get(current, []):
-                if neighbor == to_state:
-                    return path + [neighbor]
-                if neighbor not in visited:
-                    visited.add(neighbor)
-                    queue.append(path + [neighbor])
-        return None
+        if from_state not in self._cold_start_chain or to_state not in self._cold_start_chain:
+            return None
+        start = self._cold_start_chain.index(from_state)
+        end = self._cold_start_chain.index(to_state)
+        if start > end:
+            return None
+        return self._cold_start_chain[start:end + 1]
 
     # ------------------------------------------------------------------
-    # Default minimal graph
+    # Default minimal chain
     # ------------------------------------------------------------------
 
     @classmethod
     def default(cls) -> OpenWhiskExtendedStateMachine:
-        """Create the minimal OpenWhisk-style state machine."""
+        """Create the minimal OpenWhisk-style state machine.
+
+        Chain: null → prewarm → warm
+        """
         sm = cls()
 
         sm.add_state(StateDefinition("null", "stable"))
@@ -71,24 +113,38 @@ class OpenWhiskExtendedStateMachine:
         sm.add_state(StateDefinition("running", "transient", service_bound=True, reusable=False))
         sm.add_state(StateDefinition("evicted", "stable", reusable=False))
 
-        # null → prewarm (container creation)
+        # Cold-start chain transitions
         sm.add_transition(TransitionDefinition("null", "prewarm", transition_time=0.5))
-        # prewarm → warm (service binding / code loading)
         sm.add_transition(TransitionDefinition("prewarm", "warm", transition_time=0.3))
-        # warm → running (start execution)
+
+        # Execution cycle
         sm.add_transition(TransitionDefinition("warm", "running", transition_time=0.0))
-        # running → warm (finish execution)
         sm.add_transition(TransitionDefinition("running", "warm", transition_time=0.0))
-        # warm → evicted
+
+        # Eviction
         sm.add_transition(TransitionDefinition("warm", "evicted", transition_time=0.0))
-        # prewarm → evicted
         sm.add_transition(TransitionDefinition("prewarm", "evicted", transition_time=0.0))
 
+        sm.set_cold_start_chain(["null", "prewarm", "warm"])
         return sm
 
     @classmethod
     def from_config(cls, config: dict) -> OpenWhiskExtendedStateMachine:
-        """Build a state machine from config, falling back to default if absent."""
+        """Build a state machine from config, falling back to default if absent.
+
+        Config format::
+
+            {
+              "lifecycle": {
+                "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
+                "states": [...],
+                "transitions": [...]
+              }
+            }
+
+        If ``cold_start_chain`` is not provided, it is inferred as
+        ``["null", ..., "warm"]`` by following forward transitions.
+        """
         lifecycle_cfg = config.get("lifecycle")
         if not lifecycle_cfg:
             return cls.default()
@@ -116,10 +172,53 @@ class OpenWhiskExtendedStateMachine:
             )
             sm.add_transition(td)
 
-        # Validate: ensure we have at least null, warm, running, evicted
+        # Validate required states
         required = {"null", "warm", "running", "evicted"}
         missing = required - set(sm.states.keys())
         if missing:
             raise ValueError(f"Lifecycle config missing required states: {missing}")
 
+        # Set cold-start chain
+        chain_cfg = lifecycle_cfg.get("cold_start_chain")
+        if chain_cfg:
+            sm.set_cold_start_chain(chain_cfg)
+        else:
+            # Infer chain by following forward transitions from null → warm
+            chain = sm._infer_chain()
+            sm.set_cold_start_chain(chain)
+
         return sm
+
+    def _infer_chain(self) -> list[str]:
+        """Infer linear chain from null to warm by following transitions.
+
+        Each state (except warm) must have exactly one forward transition
+        to another chain candidate (excluding running and evicted).
+        """
+        exclude = {"running", "evicted"}
+        chain = ["null"]
+        visited = {"null"}
+
+        while chain[-1] != "warm":
+            current = chain[-1]
+            # Find all forward transitions from current that aren't to running/evicted
+            candidates = [
+                to_state for (from_s, to_state) in self.transitions
+                if from_s == current and to_state not in exclude and to_state not in visited
+            ]
+            if len(candidates) == 0:
+                raise ValueError(
+                    f"Cannot infer cold_start_chain: no forward transition from "
+                    f"'{current}' (chain so far: {chain}). "
+                    f"Add 'cold_start_chain' to lifecycle config explicitly."
+                )
+            if len(candidates) > 1:
+                raise ValueError(
+                    f"Cannot infer cold_start_chain: '{current}' has multiple "
+                    f"forward transitions {candidates}. "
+                    f"Add 'cold_start_chain' to lifecycle config explicitly."
+                )
+            chain.append(candidates[0])
+            visited.add(candidates[0])
+
+        return chain

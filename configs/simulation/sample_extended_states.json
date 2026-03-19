@@ -27,6 +27,7 @@
     ]
   },
   "lifecycle": {
+    "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
     "states": [
       {"name": "null", "category": "stable"},
       {"name": "prewarm", "category": "stable", "steady_memory": 0.0},
