@@ -30,6 +30,7 @@ arrival_time  dispatch_time  queue_enter_time  (transition time)  exec_start_tim
 
 1. Tìm primary node: `hash(service_id) % n_nodes` (cached per service_id)
 2. Walk hash ring (primary → primary+1 → ... → primary+n-1):
+   - Bỏ qua node nếu `node.queue_is_full` (queue depth >= `max_queue_depth`)
    - Kiểm tra `node.available.memory >= service.memory`
    - Nếu đủ:
      - Set `invocation.assigned_node_id = node.node_id`
@@ -38,7 +39,7 @@ arrival_time  dispatch_time  queue_enter_time  (transition time)  exec_start_tim
      - Set `invocation.status = "queued"`
      - `node.queue.put(invocation)` — đưa vào SimPy Store
      - Return True
-3. Nếu không node nào đủ memory:
+3. Nếu không node nào phù hợp (hết memory hoặc queue đầy):
    - Set `invocation.dropped = True`
    - Set `invocation.status = "dropped"`
    - Set `invocation.drop_reason = "no_capacity"`
@@ -90,8 +91,7 @@ Nếu không tìm thấy warm instance → tạo mới:
 
 ```python
 cold_start_proc = lifecycle_manager.prepare_instance_for_service(node, service_id)
-timeout_event = env.timeout(remaining)
-result = yield cold_start_proc | timeout_event
+instance = yield cold_start_proc
 ```
 
 **Cold start process** (`lifecycle_manager._cold_start()`):
@@ -104,8 +104,6 @@ result = yield cold_start_proc | timeout_event
    - `yield env.timeout(transition_time)`
    - Release transition resources
 5. Set `instance.state = "warm"`
-
-**Race với timeout:** Nếu timeout event thắng trước cold start hoàn thành → request bị timeout, instance có thể vẫn đang khởi động nhưng request này bị hủy.
 
 ## Phase 5: Concurrency Slot
 
@@ -137,21 +135,23 @@ service_time = serving_model.estimate_service_time(job_size, node)
 # FixedRateModel: service_time = job_size * processing_factor (default factor=1.0)
 ```
 
-### 6c. Race execution vs timeout
+### 6c. Chờ execution hoàn thành
 
 ```python
-exec_event = env.timeout(service_time)
-timeout_event = env.timeout(remaining)
-result = yield exec_event | timeout_event
+yield env.timeout(service_time)
 ```
+
+Execution time cố định = `job_size * processing_factor`. Không có timeout — request luôn chạy đến khi xong.
 
 ## Phase 7: Hoàn thành
 
-### 7a. Hoàn thành bình thường (exec_event thắng)
+### 7a. Hoàn thành bình thường
 
 ```python
 lifecycle_manager.finish_execution(instance, invocation)
 instance.slots.release(req)
+invocation.status = "completed"
+ctx.request_table.finalize(invocation)
 ```
 
 `finish_execution()`:
@@ -159,32 +159,13 @@ instance.slots.release(req)
 - Release per-request CPU: `node.release(ResourceProfile(cpu=service.cpu, memory=0))`
 - Set `invocation.execution_end_time = env.now`
 - Set `invocation.completion_time = env.now`
-- Set `invocation.status = "completed"`
 - Mark `cold_start` flag trên invocation nếu là request đầu tiên của instance
-- Gọi `ctx.request_table.finalize(inv)` — cập nhật counters, ghi latency (bisect.insort), stream CSV row, xóa khỏi `_active`
 - Nếu instance hết active requests → set `state = "warm"` (sẵn sàng nhận request tiếp)
 
-### 7b. Timeout trong quá trình execution (timeout_event thắng)
+`finalize()`:
+- Cập nhật counters, ghi latency (bisect.insort), stream CSV row, xóa khỏi `_active`
 
-```python
-lifecycle_manager.finish_execution(instance, invocation)  # cleanup resources
-instance.slots.release(req)
-invocation.timed_out = True
-invocation.status = "timed_out"
-invocation.drop_reason = "timeout"
-```
-
-Resources vẫn được release đầy đủ. Gọi `finalize(inv)` để cập nhật counters và xóa khỏi memory. Instance vẫn sống và có thể phục vụ request khác.
-
-### 7c. Timeout trước execution
-
-Xảy ra ở Phase 4a hoặc 4c:
-- Set `timed_out = True`, `dropped = True`
-- Set `status = "timed_out"`, `drop_reason = "timeout"`
-- Set `completion_time = env.now`
-- Gọi `finalize(inv)`
-
-### 7d. Dropped (no capacity)
+### 7b. Dropped (no capacity / queue full)
 
 Xảy ra ở Phase 2:
 - Set `dropped = True`
@@ -234,14 +215,12 @@ t=1.300  EXEC_END  req-2 completed (latency=0.100s, cold_start=False)
               +----------+----------+
               |                     |
          +----v-----+         +----v-----+
-         |  queued  |         | dropped  |  (no_capacity)
+         |  queued  |         | dropped  |  (no_capacity / queue_full)
          +----+-----+         +----------+
               |
-    +---------+---------+
-    |                   |
-+---v------+      +----v------+
-| completed|      | timed_out |
-+----------+      +-----------+
+         +----v------+
+         | completed |
+         +-----------+
 
                   +----------+
                   | truncated|  (simulation_end, sau drain)

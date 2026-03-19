@@ -15,8 +15,7 @@
       "idle_timeout": 30.0,
       "pool_targets": {
         "prewarm": 2,
-        "code_loaded": 1,
-        "warm": 1
+        "code_loaded": 1
       }
     }
   ],

@@ -2,37 +2,23 @@
 
 Tài liệu này mô tả các tình huống đặc biệt và cách hệ thống xử lý chúng.
 
-## 1. Timeout
+## 1. Queue Depth Limit
 
-### Timeout tính từ đâu?
+### Cơ chế
 
-Timeout luôn tính từ `arrival_time`, **không phải** từ dispatch_time hay execution_start_time:
+Mỗi node có `max_queue_depth` (cấu hình trong ComputeClass, mặc định 0 = unlimited). Khi queue đầy, LoadBalancer bỏ qua node đó và walk sang node tiếp trong hash ring.
 
-```python
-remaining = invocation.timeout - (env.now - invocation.arrival_time)
-```
+### Khi nào request bị drop?
 
-Điều này có nghĩa thời gian chờ trong queue và cold start đều tính vào timeout.
+Request bị drop khi **tất cả** nodes đều không phù hợp:
+- Queue đầy (`queue_depth >= max_queue_depth`)
+- Hoặc không đủ memory (`available.memory < service.memory`)
 
-### 3 điểm kiểm tra timeout
+Drop xảy ra **tại dispatch time**, request không bao giờ vào queue.
 
-| Điểm | Khi nào | Kết quả |
-|------|---------|---------|
-| Trước cold start | Sau khi nhận từ queue, trước khi tìm/tạo instance | `timed_out=True`, `dropped=True` |
-| Trong cold start | Race giữa cold_start_proc và timeout_event | `timed_out=True`, `dropped=True` |
-| Trong execution | Race giữa exec_event và timeout_event | `timed_out=True`, resources released |
+### Không có execution timeout
 
-### Timeout trong cold start — instance sẽ thế nào?
-
-Khi timeout xảy ra giữa cold start, request bị hủy nhưng **instance vẫn tiếp tục khởi động**. Instance này khi hoàn thành sẽ ở trạng thái "warm" và có thể phục vụ request khác. Đây là hành vi hợp lý — không lãng phí container đã bắt đầu khởi động.
-
-### Timeout trong execution — resources có bị leak?
-
-Không. Cả 2 nhánh (normal completion và timeout) đều gọi:
-- `finish_execution()` — release per-request CPU
-- `instance.slots.release(req)` — trả lại concurrency slot
-
-Instance chuyển về "warm" nếu hết active requests.
+Execution time cố định (`job_size * processing_factor`), không có timeout. Mọi request đã vào queue đều được xử lý đến hoàn thành — chỉ bị truncated nếu simulation kết thúc.
 
 ## 2. Cạn kiệt tài nguyên
 
@@ -109,7 +95,7 @@ t=0              t=duration              t=duration+drain
 Sau drain, `SimulationEngine._mark_truncated()` duyệt request_table:
 
 ```python
-terminal_statuses = {"completed", "timed_out"}
+terminal_statuses = {"completed"}
 for inv in request_table.values():
     if inv.status not in terminal_statuses and not inv.dropped:
         inv.status = "truncated"
@@ -207,7 +193,7 @@ Mặc định 5.0s. Khoảng thời gian giữa 2 lần reconcile. Càng ngắn 
 
 Với arrival_rate cao và duration dài (ví dụ 100 req/s × 3600s = 360,000 requests), plain dict giữ toàn bộ Invocation trong memory suốt simulation. `RequestStore` giải quyết bằng cách:
 
-- **Chỉ giữ in-flight:** Completed/dropped/timed_out requests bị xóa khỏi `_active` dict sau `finalize()`
+- **Chỉ giữ in-flight:** Completed/dropped requests bị xóa khỏi `_active` dict sau `finalize()`
 - **Running counters:** `counters.total`, `counters.completed`, ... cập nhật O(1) trên mỗi finalize, không cần scan
 - **Sorted latencies:** `bisect.insort()` giữ list luôn sorted — collectors đọc trực tiếp không cần sort lại
 - **Streaming trace:** Mode 2 ghi CSV row ngay khi finalize, không cần giữ data để dump cuối

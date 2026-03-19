@@ -18,17 +18,19 @@ class OpenWhiskPoolAutoscaler:
     2. Evict LRU idle containers when node is over memory
     3. Top-up pool targets per state along the cold-start chain
 
-    Each intermediate state in the cold-start chain has an independent
-    pool with its own target count.  Containers are counted **exactly**
-    at their current state — a warm container does NOT count toward the
-    prewarm pool.
+    Pool targets apply only to intermediate states between ``null``
+    and ``warm`` (exclusive).  Warm containers are created naturally
+    by request processing and kept alive by idle_timeout — like
+    OpenWhisk, there is no limit on warm container count (only
+    bounded by node memory).
 
     For chain ``[null, prewarm, code_loaded, warm]``:
 
-    - ``pool_target("svc-a", "prewarm") = 3`` → keep 3 containers
-      exactly at ``prewarm``
-    - ``pool_target("svc-a", "warm") = 1`` → keep 1 idle container
-      exactly at ``warm``
+    - ``pool_target("svc-a", "prewarm") = 3`` → keep 3 stem-cell
+      containers at ``prewarm``
+    - ``pool_target("svc-a", "code_loaded") = 1`` → keep 1 container
+      pre-warmed to ``code_loaded``
+    - ``warm`` is NOT a valid pool target state
     """
 
     def __init__(self, ctx: SimContext, reconcile_interval: float = 5.0):
@@ -39,9 +41,10 @@ class OpenWhiskPoolAutoscaler:
         # Evictable states from state machine (stable, not null/evicted)
         self._evictable_states = ctx.lifecycle_manager.sm.get_evictable_states()
 
-        # Cold-start chain (excluding "null"): states from shallowest to deepest
+        # Pool states: intermediate states between null and warm (exclusive)
+        # Warm containers are created on-demand by requests, not by pool top-up.
         chain = ctx.lifecycle_manager.sm.get_cold_start_path()
-        self._pool_states = [s for s in chain if s != "null"]  # e.g. ["prewarm", "code_loaded", "warm"]
+        self._pool_states = [s for s in chain if s not in ("null", "warm")]  # e.g. ["prewarm", "code_loaded"]
 
         # Per-service parameters
         self._idle_timeout: dict[str, float] = {}
@@ -53,9 +56,11 @@ class OpenWhiskPoolAutoscaler:
             self._idle_timeout[svc.service_id] = svc.idle_timeout
             self._pool_targets[svc.service_id] = {}
 
-            # Per-state targets from config (explicit)
+            # Per-state targets from config (only intermediate states)
             if svc.pool_targets:
-                self._pool_targets[svc.service_id].update(svc.pool_targets)
+                for state, count in svc.pool_targets.items():
+                    if state in self._pool_states:
+                        self._pool_targets[svc.service_id][state] = count
 
             # Backward compat: prewarm_count sets target for first pool state
             # (only if pool_targets didn't already set it)
@@ -129,7 +134,13 @@ class OpenWhiskPoolAutoscaler:
         return self._pool_targets.get(service_id, {}).get(state, 0)
 
     def set_pool_target(self, service_id: str, state: str, count: int) -> None:
-        """Set pool target for a specific state."""
+        """Set pool target for a specific state (must be an intermediate state)."""
+        if state not in self._pool_states:
+            self.logger.warning(
+                "Ignoring pool target for '%s' — only intermediate states %s are valid",
+                state, self._pool_states,
+            )
+            return
         self._pool_targets.setdefault(service_id, {})[state] = count
 
     def get_all_pool_targets(self, service_id: str) -> dict[str, int]:

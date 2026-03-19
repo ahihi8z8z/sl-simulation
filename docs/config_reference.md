@@ -33,12 +33,12 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
       "service_id": "svc-hello",
       "arrival_rate": 5.0,
       "job_size": 0.1,
-      "timeout": 10.0,
       "memory": 256,
       "cpu": 1.0,
       "max_concurrency": 4,
       "prewarm_count": 1,
-      "idle_timeout": 30.0
+      "idle_timeout": 30.0,
+      "pool_targets": {"prewarm": 2, "code_loaded": 1}
     }
   ]
 }
@@ -49,14 +49,14 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
 | `service_id` | str | có | — | Định danh duy nhất của service |
 | `arrival_rate` | float | có | — | Poisson arrival rate (requests/giây) |
 | `job_size` | float | có | — | Kích thước công việc. `service_time = job_size * processing_factor` |
-| `timeout` | float | có | — | Timeout từ arrival_time (giây) |
 | `memory` | float | có | — | Memory per container (MB) |
 | `cpu` | float | có | — | CPU per request (cores). Allocate khi execution, release khi done |
 | `max_concurrency` | int | có | — | Số request đồng thời tối đa trên 1 container |
 | `display_name` | str | không | service_id | Tên hiển thị |
 | `arrival_mode` | str | không | "poisson" | Kiểu phân phối arrival (hiện chỉ có poisson) |
-| `prewarm_count` | int | không | 0 | Số container prewarm khi autoscaler bật |
+| `prewarm_count` | int | không | 0 | Alias — đặt pool target cho state đầu tiên trong chain |
 | `idle_timeout` | float | không | 60.0 | Thời gian idle trước khi bị evict (giây) |
+| `pool_targets` | dict | không | {} | Per-state pool targets, ví dụ `{"prewarm": 2, "code_loaded": 1}`. Chỉ áp dụng cho states trung gian (không bao gồm `warm`) |
 
 ### cluster (bắt buộc)
 
@@ -67,7 +67,8 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
       {
         "node_id": "node-0",
         "cpu_capacity": 8.0,
-        "memory_capacity": 8192
+        "memory_capacity": 8192,
+        "max_queue_depth": 100
       }
     ]
   }
@@ -85,6 +86,7 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
 | `node_id` | str | có | — | Định danh duy nhất của node |
 | `cpu_capacity` | float | có | — | Tổng CPU (cores) |
 | `memory_capacity` | float | có | — | Tổng memory (MB) |
+| `max_queue_depth` | int | không | 0 | Giới hạn request trong queue (0 = unlimited). Khi đầy, LoadBalancer walk sang node khác |
 
 ### autoscaling (tùy chọn)
 
@@ -105,7 +107,7 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
 Khi `enabled: true`, autoscaler thực hiện 3 việc mỗi reconcile:
 1. Evict containers idle quá `idle_timeout` của service
 2. LRU evict khi node overcommit memory
-3. Top-up prewarm containers đến `prewarm_count` của service
+3. Top-up pool targets — tạo containers đến target count cho mỗi state trung gian (không bao gồm `warm`). Warm containers tạo tự nhiên bởi request
 
 ### monitoring (tùy chọn)
 
@@ -223,14 +225,12 @@ null --0.5s--> prewarm --0.3s--> warm
 
 ```json
 {
-  "step_duration": 5.0,
   "max_steps": 50,
   "prewarm_max": 10,
   "idle_timeout_max": 120.0,
   "observation_metrics": null,
   "reward": {
     "drop_penalty": -1.0,
-    "timeout_penalty": -1.0,
     "cold_start_penalty": -0.1,
     "latency_penalty": -0.5,
     "resource_penalty": -0.1,
@@ -241,9 +241,8 @@ null --0.5s--> prewarm --0.3s--> warm
 
 | Key | Type | Mặc định | Mô tả |
 |-----|------|----------|-------|
-| `step_duration` | float | 5.0 | Số giây simulation mỗi step() call |
-| `max_steps` | int | 100 | Số step tối đa mỗi episode |
-| `prewarm_max` | int | 10 | Giới hạn trên action tăng prewarm |
+| `max_steps` | int | 100 | Số step tối đa mỗi episode. `step_duration` tự lấy từ `controller.interval` |
+| `prewarm_max` | int | 10 | Giới hạn trên action tăng pool target |
 | `idle_timeout_max` | float | 120.0 | Giới hạn trên action tăng idle_timeout |
 | `observation_metrics` | list/null | null | Danh sách tên metric cho observation. null = dùng default 11 metrics |
 | `reward.*` | float | xem trên | Hệ số reward cho từng thành phần |
