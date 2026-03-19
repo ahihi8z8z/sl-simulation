@@ -105,7 +105,7 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
 | `reconcile_interval` | float | 5.0 | Chu kỳ reconcile (giây) |
 
 Khi `enabled: true`:
-- **Reconcile** (periodic): evict containers idle quá `idle_timeout` (chỉ containers đã từng serve request — pool stem cells không bị idle evict), LRU evict khi overcommit memory
+- **Reconcile** (periodic): evict warm containers idle quá `idle_timeout` (containers ở intermediate states không bị idle evict), LRU evict khi overcommit memory
 - **Pool top-up** (reactive): fill lại pool ngay khi instance bị evict, bị promote, hoặc target thay đổi. Không đợi reconcile
 - **Initial fill**: fill tất cả pools đến target khi startup
 - Warm containers tạo tự nhiên bởi request, không có pool target

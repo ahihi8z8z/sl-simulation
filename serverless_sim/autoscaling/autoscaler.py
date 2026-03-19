@@ -90,11 +90,12 @@ class OpenWhiskPoolAutoscaler:
         for node in self.ctx.cluster_manager.get_enabled_nodes():
             instances = lm.get_instances_for_node(node.node_id)
 
-            # 1. Evict idle containers past idle_timeout
-            #    Skip pool containers that have never served a request —
-            #    like OpenWhisk, prewarm stem cells persist until consumed.
+            # 1. Evict idle warm containers past idle_timeout
+            #    Only warm containers are subject to idle timeout.
+            #    Pool containers at intermediate states (prewarm, code_loaded, ...)
+            #    persist until consumed or LRU-evicted — like OpenWhisk stem cells.
             for inst in instances:
-                if inst.state in self._evictable_states and inst.is_idle and inst.has_served:
+                if inst.state == "warm" and inst.is_idle:
                     timeout = self._idle_timeout.get(inst.service_id, 60.0)
                     if (now - inst.last_used_at) >= timeout:
                         lm.evict_instance(inst)
