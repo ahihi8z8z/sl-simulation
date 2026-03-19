@@ -21,7 +21,7 @@ arrival_time  dispatch_time  queue_enter_time  (transition time)  exec_start_tim
    - `status = "arrived"`
    - `arrival_time = env.now`
    - `service_id`, `job_size`, `timeout` từ ServiceClass
-5. Đăng ký vào `ctx.request_table[request_id]`
+5. Đăng ký vào `ctx.request_table.register(inv)` — thêm vào `_active` dict, tăng `counters.total`
 6. Gọi `ctx.dispatcher.dispatch(invocation)`
 
 ## Phase 2: Dispatch (ShardingContainerPoolBalancer)
@@ -161,6 +161,7 @@ instance.slots.release(req)
 - Set `invocation.completion_time = env.now`
 - Set `invocation.status = "completed"`
 - Mark `cold_start` flag trên invocation nếu là request đầu tiên của instance
+- Gọi `ctx.request_table.finalize(inv)` — cập nhật counters, ghi latency (bisect.insort), stream CSV row, xóa khỏi `_active`
 - Nếu instance hết active requests → set `state = "warm"` (sẵn sàng nhận request tiếp)
 
 ### 7b. Timeout trong quá trình execution (timeout_event thắng)
@@ -173,7 +174,7 @@ invocation.status = "timed_out"
 invocation.drop_reason = "timeout"
 ```
 
-Resources vẫn được release đầy đủ. Instance vẫn sống và có thể phục vụ request khác.
+Resources vẫn được release đầy đủ. Gọi `finalize(inv)` để cập nhật counters và xóa khỏi memory. Instance vẫn sống và có thể phục vụ request khác.
 
 ### 7c. Timeout trước execution
 
@@ -181,18 +182,23 @@ Xảy ra ở Phase 4a hoặc 4c:
 - Set `timed_out = True`, `dropped = True`
 - Set `status = "timed_out"`, `drop_reason = "timeout"`
 - Set `completion_time = env.now`
+- Gọi `finalize(inv)`
 
 ### 7d. Dropped (no capacity)
 
 Xảy ra ở Phase 2:
 - Set `dropped = True`
 - Set `status = "dropped"`, `drop_reason = "no_capacity"`
+- Gọi `finalize(inv)`
 
 ### 7e. Truncated (simulation kết thúc)
 
 Xảy ra sau drain period trong `SimulationEngine.shutdown()`:
 - Set `status = "truncated"`, `drop_reason = "simulation_end"`
 - Set `completion_time = env.now`
+- Gọi `finalize(inv)`
+
+Mọi trường hợp terminal đều kết thúc bằng `finalize()` — đảm bảo request được flush khỏi memory sau khi counters và trace đã ghi.
 
 ## Timeline minh họa
 

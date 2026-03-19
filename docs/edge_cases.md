@@ -201,7 +201,28 @@ Thứ tự này quan trọng — nếu top-up trước evict thì có thể tạ
 
 Mặc định 5.0s. Khoảng thời gian giữa 2 lần reconcile. Càng ngắn càng nhạy nhưng tốn CPU mô phỏng.
 
-## 8. Monitoring Edge Cases
+## 8. RequestStore và Memory
+
+### Tại sao không dùng plain dict?
+
+Với arrival_rate cao và duration dài (ví dụ 100 req/s × 3600s = 360,000 requests), plain dict giữ toàn bộ Invocation trong memory suốt simulation. `RequestStore` giải quyết bằng cách:
+
+- **Chỉ giữ in-flight:** Completed/dropped/timed_out requests bị xóa khỏi `_active` dict sau `finalize()`
+- **Running counters:** `counters.total`, `counters.completed`, ... cập nhật O(1) trên mỗi finalize, không cần scan
+- **Sorted latencies:** `bisect.insort()` giữ list luôn sorted — collectors đọc trực tiếp không cần sort lại
+- **Streaming trace:** Mode 2 ghi CSV row ngay khi finalize, không cần giữ data để dump cuối
+
+### Latency list vẫn tăng
+
+`store.latencies` là list tất cả latencies của completed requests — vẫn tăng theo số completed. Nhưng mỗi entry chỉ là 1 float (8 bytes) thay vì toàn bộ Invocation (~500 bytes). Với 360,000 requests → ~2.8 MB thay vì ~180 MB.
+
+### `len(store)` vs `store.active_count`
+
+- `len(store)` trả về `counters.total` — tổng requests từng tạo (bao gồm đã flush)
+- `store.active_count` trả về `len(_active)` — chỉ in-flight requests hiện tại
+- `store.values()` chỉ iterate in-flight requests
+
+## 9. Monitoring Edge Cases
 
 ### MetricStore ring buffer
 
@@ -222,7 +243,11 @@ Khi chỉ có 1-2 completed requests:
 - p50, p95, p99 đều bằng chính giá trị đó (index truncation)
 - Không phải vấn đề — chỉ là do số lượng nhỏ
 
-## 9. Gym Environment Edge Cases
+### Latency performance
+
+`RequestCollector` trước đây sort toàn bộ latency list mỗi lần collect (O(n log n) mỗi giây, n tăng dần). Giờ `RequestStore` dùng `bisect.insort()` để giữ list luôn sorted — collector chỉ cần đọc trực tiếp O(1). Mean latency dùng `_latency_sum` tích lũy thay vì `sum()` mỗi lần.
+
+## 10. Gym Environment Edge Cases
 
 ### reset() tạo simulation mới hoàn toàn
 
@@ -236,7 +261,7 @@ Mỗi lần gọi `reset()`, `ServerlessGymEnv` tạo lại toàn bộ simulatio
 
 Nếu metric có giá trị infinity hoặc NaN (ví dụ chia cho 0), observation vector có thể chứa NaN → PPO có thể gặp vấn đề. Hiện tại `ClusterCollector` trả về `0.0` khi `total_cpu == 0` để tránh trường hợp này.
 
-## 10. Configuration Edge Cases
+## 11. Configuration Edge Cases
 
 ### Services list rỗng
 
