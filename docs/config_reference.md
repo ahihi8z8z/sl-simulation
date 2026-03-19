@@ -22,7 +22,7 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
 | `duration` | float | có | — | Thời gian sinh workload (giây). Simulation chạy thêm drain period sau duration |
 | `seed` | int | có | — | Seed cho numpy RNG. Cùng seed → cùng kết quả |
 | `export_mode` | int | không | 0 | 0: summary, 1: +metrics CSV, 2: +request trace CSV |
-| `drain_timeout` | float | không | max(service.timeout) | Thời gian chờ in-flight requests hoàn thành sau duration |
+| `drain_timeout` | float | không | 30.0 | Thời gian chờ in-flight requests hoàn thành sau duration |
 
 ### services (bắt buộc, non-empty list)
 
@@ -104,10 +104,11 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
 | `enabled` | bool | false | Bật/tắt autoscaler |
 | `reconcile_interval` | float | 5.0 | Chu kỳ reconcile (giây) |
 
-Khi `enabled: true`, autoscaler thực hiện 3 việc mỗi reconcile:
-1. Evict containers idle quá `idle_timeout` của service
-2. LRU evict khi node overcommit memory
-3. Top-up pool targets — tạo containers đến target count cho mỗi state trung gian (không bao gồm `warm`). Warm containers tạo tự nhiên bởi request
+Khi `enabled: true`:
+- **Reconcile** (periodic): evict containers idle quá `idle_timeout`, LRU evict khi overcommit memory
+- **Pool top-up** (reactive): fill lại pool ngay khi instance bị evict, bị promote, hoặc target thay đổi. Không đợi reconcile
+- **Initial fill**: fill tất cả pools đến target khi startup
+- Warm containers tạo tự nhiên bởi request, không có pool target
 
 ### monitoring (tùy chọn)
 

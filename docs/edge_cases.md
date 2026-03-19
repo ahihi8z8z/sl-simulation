@@ -87,7 +87,7 @@ t=0              t=duration              t=duration+drain
 }
 ```
 
-- Nếu không set: mặc định = `max(service.timeout)` của tất cả services
+- Nếu không set: mặc định = 30s
 - Set `drain_timeout: 0` để tắt drain (truncate ngay)
 
 ### Requests bị truncated
@@ -173,19 +173,34 @@ Ngoài memory (allocate 1 lần khi tạo instance), mỗi transition có thể 
 - Release sau khi wait xong
 - Ví dụ: transition prewarm→code_loaded dùng 0.2 CPU và 64 MB tạm thời
 
-## 7. Autoscaler Reconcile Timing
+## 7. Autoscaler: Reconcile + Reactive Top-up
 
-### Thứ tự 3 giai đoạn
+### Reconcile chỉ xử lý eviction (2 giai đoạn)
 
 1. **Evict idle:** Evict instances idle quá idle_timeout → giải phóng memory
 2. **LRU evict:** Nếu vẫn overcommit → evict LRU idle → đảm bảo memory dương
-3. **Prewarm top-up:** Tạo thêm prewarm instances nếu dưới target → dùng memory mới giải phóng
 
-Thứ tự này quan trọng — nếu top-up trước evict thì có thể tạo instance rồi phải evict ngay.
+### Pool top-up là reactive
+
+Pool **không** được fill trong reconcile. Thay vào đó, `notify_pool_change()` được gọi ngay khi:
+- Instance bị **evict** (từ `evict_instance()`)
+- Instance bị **promote** lên warm (từ `promote_instance()`)
+- **Pool target thay đổi** (từ `set_pool_target()`)
+- **Startup** (từ `initial_fill()` khi gọi `autoscaler.start()`)
+
+Điều này loại bỏ delay tối đa = reconcile_interval khi pool cạn — fill xảy ra ngay lập tức.
+
+### Promote edge case
+
+Khi request promote instance từ `code_loaded` → `warm`:
+1. Instance chuyển sang warm, phục vụ request
+2. `notify_pool_change()` tạo instance mới từ null → code_loaded
+3. Instance mới mất 0.7s để sẵn sàng — trong thời gian đó pool tạm thiếu 1
+4. Nếu burst request đến trong khoảng này → full cold start cho các request tiếp theo
 
 ### reconcile_interval
 
-Mặc định 5.0s. Khoảng thời gian giữa 2 lần reconcile. Càng ngắn càng nhạy nhưng tốn CPU mô phỏng.
+Mặc định 5.0s. Chỉ ảnh hưởng đến tốc độ phát hiện idle containers để evict. Không ảnh hưởng đến pool fill (đã reactive).
 
 ## 8. RequestStore và Memory
 

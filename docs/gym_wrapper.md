@@ -26,7 +26,7 @@ Mỗi `step()` gọi:
 | 6 | `lifecycle.instances_total` | Tổng container (không kể evicted) |
 | 7 | `lifecycle.instances_warm` | Container đang warm (idle, sẵn sàng) |
 | 8 | `lifecycle.instances_running` | Container đang chạy request |
-| 10 | `lifecycle.instances_prewarm` | Container đang prewarm |
+| 9 | `lifecycle.instances_prewarm` | Container đang prewarm |
 
 Có thể tùy chỉnh bằng `observation_metrics` trong gym config:
 ```json

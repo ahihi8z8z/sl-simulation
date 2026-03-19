@@ -146,7 +146,6 @@ Mean reward: -10.45
 
 Chạy inference với trained model và so sánh kết quả (summary.txt) với simulation dùng ThresholdPolicy (controller enabled). Các chỉ số để so sánh:
 - Drop rate
-- Timeout rate
 - Cold start rate
 - Mean latency
 - CPU utilization
