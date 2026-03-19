@@ -126,7 +126,10 @@ class AutoscalingCollector(BaseCollector):
 
         metrics = {}
         for svc_id in ctx.workload_manager.services:
-            metrics[f"autoscaling.{svc_id}.prewarm_target"] = ctx.autoscaling_manager.get_prewarm_count(svc_id)
             metrics[f"autoscaling.{svc_id}.idle_timeout"] = ctx.autoscaling_manager.get_idle_timeout(svc_id)
+            # Per-state pool targets
+            targets = ctx.autoscaling_manager.get_all_pool_targets(svc_id)
+            for state, count in targets.items():
+                metrics[f"autoscaling.{svc_id}.pool_target.{state}"] = count
 
         return metrics

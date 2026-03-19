@@ -12,6 +12,19 @@ class AutoscalingAPI:
     def __init__(self, autoscaler: OpenWhiskPoolAutoscaler):
         self._autoscaler = autoscaler
 
+    # -- Per-state pool targets --
+
+    def get_pool_target(self, service_id: str, state: str) -> int:
+        return self._autoscaler.get_pool_target(service_id, state)
+
+    def set_pool_target(self, service_id: str, state: str, count: int) -> None:
+        self._autoscaler.set_pool_target(service_id, state, count)
+
+    def get_all_pool_targets(self, service_id: str) -> dict[str, int]:
+        return self._autoscaler.get_all_pool_targets(service_id)
+
+    # -- Backward-compatible prewarm_count --
+
     def get_idle_timeout(self, service_id: str) -> float:
         return self._autoscaler.get_idle_timeout(service_id)
 

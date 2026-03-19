@@ -45,16 +45,20 @@ class LifecycleManager:
         return None
 
     def prepare_instance_for_service(
-        self, node: Node, service_id: str
+        self, node: Node, service_id: str, target_state: str = "warm",
     ) -> simpy.events.Event:
-        """Create a new instance and transition it to warm (cold start).
+        """Create a new instance and transition it to *target_state*.
+
+        *target_state* must be a state in the cold-start chain (e.g.
+        ``"prewarm"``, ``"code_loaded"``, ``"warm"``).  Defaults to
+        ``"warm"`` for a full cold start.
 
         Returns a SimPy process that yields until the instance is ready.
         """
-        return self.ctx.env.process(self._cold_start(node, service_id))
+        return self.ctx.env.process(self._cold_start(node, service_id, target_state))
 
-    def _cold_start(self, node: Node, service_id: str):
-        """SimPy process: follow path from null → warm using state machine."""
+    def _cold_start(self, node: Node, service_id: str, target_state: str = "warm"):
+        """SimPy process: follow chain from null → target_state."""
         service = self.ctx.workload_manager.services[service_id]
 
         inst = ContainerInstance(
@@ -71,10 +75,10 @@ class LifecycleManager:
         mem_req = ResourceProfile(cpu=0.0, memory=service.memory)
         node.allocate(mem_req)
 
-        # Find path from null to warm
-        path = self.sm.find_path("null", "warm")
+        # Find path from null to target_state
+        path = self.sm.find_path("null", target_state)
         if path is None:
-            path = ["null", "warm"]  # fallback
+            path = ["null", target_state]  # fallback
 
         # Walk the path, applying transitions
         for i in range(len(path) - 1):
@@ -100,7 +104,7 @@ class LifecycleManager:
                 if td.transition_cpu > 0 or td.transition_memory > 0:
                     node.release(trans_res)
 
-        inst.state = "warm"
+        inst.state = target_state
         inst.target_state = None
         inst.state_entered_at = self.ctx.env.now
         inst.service_id = service_id

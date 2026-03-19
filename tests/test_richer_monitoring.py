@@ -148,7 +148,7 @@ class TestAutoscalingCollector:
     def test_prewarm_target_value(self):
         ctx, _ = _run_multi_service_sim()
         store = ctx.monitor_manager.store
-        entry = store.get_latest("autoscaling.svc-api.prewarm_target")
+        entry = store.get_latest("autoscaling.svc-api.pool_target.prewarm")
         assert entry is not None
         assert entry[1] >= 0
 
