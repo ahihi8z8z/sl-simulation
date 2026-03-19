@@ -44,7 +44,9 @@ class ServerlessGymEnv(gym.Env):
                 self.gym_config = json.load(f)
 
         # Extract gym parameters
-        self.step_duration = self.gym_config.get("step_duration", 5.0)
+        # step_duration syncs with controller interval (one control cycle per step)
+        ctrl_cfg = self.sim_config.get("controller", {})
+        self.step_duration = ctrl_cfg.get("interval", 5.0)
         self.max_steps = self.gym_config.get("max_steps", 100)
 
         # Build components (deferred to reset)

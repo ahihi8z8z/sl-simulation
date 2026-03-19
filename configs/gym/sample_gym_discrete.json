@@ -1,5 +1,4 @@
 {
-  "step_duration": 5.0,
   "max_steps": 50,
   "prewarm_max": 10,
   "idle_timeout_max": 120.0,
