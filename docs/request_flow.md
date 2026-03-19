@@ -28,7 +28,7 @@ arrival_time  dispatch_time  queue_enter_time  (transition time)  exec_start_tim
 
 **File:** `scheduling/load_balancer.py` — `dispatch()`
 
-1. Tìm primary node: `md5(service_id).hex() % n_nodes`
+1. Tìm primary node: `hash(service_id) % n_nodes` (cached per service_id)
 2. Walk hash ring (primary → primary+1 → ... → primary+n-1):
    - Kiểm tra `node.available.memory >= service.memory`
    - Nếu đủ:

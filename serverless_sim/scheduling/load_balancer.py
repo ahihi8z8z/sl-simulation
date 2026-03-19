@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import logging
 from typing import TYPE_CHECKING
 
@@ -23,6 +22,7 @@ class ShardingContainerPoolBalancer:
         self.ctx = ctx
         self.logger = ctx.logger
         self._nodes = ctx.cluster_manager.get_enabled_nodes()
+        self._hash_cache: dict[str, int] = {}  # service_id → hash()
 
     def dispatch(self, invocation: Invocation) -> bool:
         """Dispatch an invocation to a node queue.
@@ -83,8 +83,10 @@ class ShardingContainerPoolBalancer:
             reason,
         )
 
-    @staticmethod
-    def _hash_to_index(service_id: str, n: int) -> int:
-        """Consistent hash of service_id to a node index."""
-        h = int(hashlib.md5(service_id.encode()).hexdigest(), 16)
+    def _hash_to_index(self, service_id: str, n: int) -> int:
+        """Consistent hash of service_id to a node index (cached)."""
+        h = self._hash_cache.get(service_id)
+        if h is None:
+            h = hash(service_id)
+            self._hash_cache[service_id] = h
         return h % n

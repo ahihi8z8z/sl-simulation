@@ -126,7 +126,7 @@ Truncated requests:
 
 ### Service affinity
 
-Cùng một `service_id` luôn hash về cùng primary node. Điều này đảm bảo:
+Cùng một `service_id` luôn hash về cùng primary node (dùng `hash()` built-in, cached per service_id). Điều này đảm bảo:
 - Các request của cùng service có xu hướng đến cùng node
 - Tăng khả năng reuse warm instance (giảm cold start)
 - Khi node hết memory → fallback walk ring, mất affinity
