@@ -69,3 +69,6 @@ class BaseController:
             self.ctx.autoscaling_manager.set_prewarm_count(svc_id, value)
         elif act == "set_idle_timeout":
             self.ctx.autoscaling_manager.set_idle_timeout(svc_id, value)
+        elif act == "set_pool_target":
+            state = action["state"]
+            self.ctx.autoscaling_manager.set_pool_target(svc_id, state, value)

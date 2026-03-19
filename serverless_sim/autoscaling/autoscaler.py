@@ -18,15 +18,17 @@ class OpenWhiskPoolAutoscaler:
     2. Evict LRU idle containers when node is over memory
     3. Top-up pool targets per state along the cold-start chain
 
-    Pool targets control how many containers should be pre-warmed to
-    each state.  For chain ``[null, prewarm, code_loaded, warm]``:
+    Each intermediate state in the cold-start chain has an independent
+    pool with its own target count.  Containers are counted **exactly**
+    at their current state — a warm container does NOT count toward the
+    prewarm pool.
 
-    - ``pool_target("svc-a", "prewarm") = 3`` → keep 3 containers at
-      prewarm or deeper
-    - ``pool_target("svc-a", "warm") = 1`` → keep 1 container at warm
+    For chain ``[null, prewarm, code_loaded, warm]``:
 
-    Deeper states count toward shallower targets (a warm container
-    also satisfies prewarm target).
+    - ``pool_target("svc-a", "prewarm") = 3`` → keep 3 containers
+      exactly at ``prewarm``
+    - ``pool_target("svc-a", "warm") = 1`` → keep 1 idle container
+      exactly at ``warm``
     """
 
     def __init__(self, ctx: SimContext, reconcile_interval: float = 5.0):
@@ -41,9 +43,6 @@ class OpenWhiskPoolAutoscaler:
         chain = ctx.lifecycle_manager.sm.get_cold_start_path()
         self._pool_states = [s for s in chain if s != "null"]  # e.g. ["prewarm", "code_loaded", "warm"]
 
-        # Build chain index for "at or deeper" counting
-        self._chain_index = {s: i for i, s in enumerate(chain)}
-
         # Per-service parameters
         self._idle_timeout: dict[str, float] = {}
         # Per-service per-state pool targets: {svc_id: {state: count}}
@@ -52,16 +51,17 @@ class OpenWhiskPoolAutoscaler:
         # Initialize from config
         for svc in ctx.workload_manager.services.values():
             self._idle_timeout[svc.service_id] = svc.idle_timeout
-            # Backward compat: prewarm_count sets target for first pool state
             self._pool_targets[svc.service_id] = {}
+
+            # Per-state targets from config (explicit)
+            if svc.pool_targets:
+                self._pool_targets[svc.service_id].update(svc.pool_targets)
+
+            # Backward compat: prewarm_count sets target for first pool state
+            # (only if pool_targets didn't already set it)
             if svc.prewarm_count > 0:
                 first_state = self._pool_states[0] if self._pool_states else "prewarm"
-                self._pool_targets[svc.service_id][first_state] = svc.prewarm_count
-
-            # Read per-state targets from config if present
-            pool_cfg = getattr(svc, "pool_targets", None)
-            if pool_cfg and isinstance(pool_cfg, dict):
-                self._pool_targets[svc.service_id].update(pool_cfg)
+                self._pool_targets[svc.service_id].setdefault(first_state, svc.prewarm_count)
 
     def start(self) -> None:
         self.ctx.env.process(self._reconcile_loop())
@@ -100,23 +100,20 @@ class OpenWhiskPoolAutoscaler:
                 instances = lm.get_instances_for_node(node.node_id)
 
             # 3. Per-state pool top-up
-            # Walk states from deepest to shallowest so deeper containers
-            # count toward shallower targets.
+            # Each pool is independent — count containers exactly at that state.
+            # Walk from shallowest to deepest so cheaper containers are created first.
             for svc_id, targets in self._pool_targets.items():
-                for state in reversed(self._pool_states):
+                for state in self._pool_states:
                     target = targets.get(state, 0)
                     if target <= 0:
                         continue
 
-                    # Count instances at this state or deeper
-                    state_idx = self._chain_index.get(state, -1)
-                    alive = [
+                    # Count instances exactly at this state
+                    at_state = [
                         i for i in lm.get_instances_for_node(node.node_id)
-                        if i.service_id == svc_id
-                        and i.state not in ("null", "evicted")
-                        and self._chain_index.get(i.state, -1) >= state_idx
+                        if i.service_id == svc_id and i.state == state
                     ]
-                    deficit = target - len(alive)
+                    deficit = target - len(at_state)
                     for _ in range(deficit):
                         service = self.ctx.workload_manager.services[svc_id]
                         mem_req = ResourceProfile(cpu=0.0, memory=service.memory)

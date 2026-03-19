@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -15,6 +15,7 @@ class ServiceClass:
     cpu: float = 1.0
     prewarm_count: int = 0
     idle_timeout: float = 60.0
+    pool_targets: dict = field(default_factory=dict)  # {state: count}
 
     @classmethod
     def from_config(cls, cfg: dict) -> "ServiceClass":
@@ -30,4 +31,5 @@ class ServiceClass:
             cpu=cfg["cpu"],
             prewarm_count=cfg.get("prewarm_count", 0),
             idle_timeout=cfg.get("idle_timeout", 60.0),
+            pool_targets=cfg.get("pool_targets", {}),
         )
