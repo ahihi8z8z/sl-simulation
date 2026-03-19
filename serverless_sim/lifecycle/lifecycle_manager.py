@@ -45,6 +45,90 @@ class LifecycleManager:
                 return inst
         return None
 
+    def find_promotable_instance(self, node: Node, service_id: str) -> ContainerInstance | None:
+        """Find the deepest intermediate instance that can be promoted to warm.
+
+        Returns the instance closest to warm in the cold-start chain,
+        or None if no promotable instance exists.  Only considers
+        instances that have finished their current transition
+        (``target_state is None``) and are idle.
+        """
+        chain = self.sm.get_cold_start_path()
+        # Intermediate states: everything between null and warm (exclusive)
+        intermediate = chain[1:-1]  # e.g. ["prewarm", "code_loaded"]
+        if not intermediate:
+            return None
+
+        # Search from deepest (closest to warm) to shallowest
+        for state in reversed(intermediate):
+            for inst in self._get_instances(node.node_id):
+                if (
+                    inst.service_id == service_id
+                    and inst.state == state
+                    and inst.target_state is None  # not mid-transition
+                    and inst.is_idle
+                ):
+                    return inst
+        return None
+
+    def promote_instance(
+        self, node: Node, instance: ContainerInstance,
+    ) -> simpy.events.Event:
+        """Promote an intermediate instance to warm by running the remaining chain.
+
+        Returns a SimPy process that yields until the instance reaches warm.
+        Notifies the autoscaler to replenish the vacated pool state.
+        """
+        return self.ctx.env.process(self._promote(node, instance))
+
+    def _promote(self, node: Node, instance: ContainerInstance):
+        """SimPy process: transition instance from current state → warm."""
+        from_state = instance.state
+        path = self.sm.find_path(from_state, "warm")
+        if path is None or len(path) < 2:
+            instance.state = "warm"
+            instance.state_entered_at = self.ctx.env.now
+            return instance
+
+        for i in range(len(path) - 1):
+            s_from = path[i]
+            s_to = path[i + 1]
+            td = self.sm.get_transition(s_from, s_to)
+
+            instance.state = s_from
+            instance.target_state = s_to
+            instance.state_entered_at = self.ctx.env.now
+
+            if td:
+                if td.transition_cpu > 0 or td.transition_memory > 0:
+                    trans_res = ResourceProfile(cpu=td.transition_cpu, memory=td.transition_memory)
+                    node.allocate(trans_res)
+                if td.transition_time > 0:
+                    yield self.ctx.env.timeout(td.transition_time)
+                if td.transition_cpu > 0 or td.transition_memory > 0:
+                    node.release(trans_res)
+
+        instance.state = "warm"
+        instance.target_state = None
+        instance.state_entered_at = self.ctx.env.now
+
+        self.logger.debug(
+            "t=%.3f | PROMOTE | %s %s→warm on %s (%.3fs)",
+            self.ctx.env.now,
+            instance.instance_id,
+            from_state,
+            node.node_id,
+            self.ctx.env.now - instance.created_at,
+        )
+
+        # Notify autoscaler to replenish the vacated pool state
+        if self.ctx.autoscaling_manager is not None:
+            self.ctx.autoscaling_manager.notify_pool_change(
+                node.node_id, instance.service_id,
+            )
+
+        return instance
+
     def prepare_instance_for_service(
         self, node: Node, service_id: str, target_state: str = "warm",
     ) -> simpy.events.Event:

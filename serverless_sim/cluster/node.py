@@ -108,9 +108,15 @@ class Node:
         cold_start = instance is None
 
         if instance is None:
-            # Cold start: create new instance and wait for it to be ready
-            cold_start_proc = lm.prepare_instance_for_service(self, invocation.service_id)
-            instance = yield cold_start_proc
+            # Try to promote an intermediate instance (faster than full cold start)
+            promotable = lm.find_promotable_instance(self, invocation.service_id)
+            if promotable is not None:
+                promote_proc = lm.promote_instance(self, promotable)
+                instance = yield promote_proc
+            else:
+                # Full cold start: create new instance from null
+                cold_start_proc = lm.prepare_instance_for_service(self, invocation.service_id)
+                instance = yield cold_start_proc
 
         # Acquire concurrency slot
         req = instance.slots.request()

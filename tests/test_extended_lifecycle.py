@@ -204,3 +204,125 @@ class TestExtendedLifecycleSimulation:
             assert avg_latency < 0.9, (
                 f"Average latency {avg_latency:.3f}s should be < 0.9s cold start overhead"
             )
+
+
+# ------------------------------------------------------------------ #
+# Promote tests
+# ------------------------------------------------------------------ #
+
+class TestPromoteInstance:
+    """Test promoting intermediate pool instances to warm."""
+
+    def _make_ctx_with_pool(self, pool_targets=None):
+        """Create a context with extended states and pool targets."""
+        config = {
+            **EXTENDED_CONFIG,
+            "services": [{
+                **EXTENDED_CONFIG["services"][0],
+                "arrival_rate": 0.0,  # no auto-generated requests
+                "pool_targets": pool_targets or {},
+            }],
+            "autoscaling": {"enabled": True, "reconcile_interval": 100.0},
+        }
+        env = simpy.Environment()
+        rng = np.random.default_rng(42)
+        logger = logging.getLogger("test_promote")
+        logger.handlers.clear()
+        logger.setLevel(logging.WARNING)
+
+        from serverless_sim.autoscaling.autoscaler import OpenWhiskPoolAutoscaler
+
+        ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir="/tmp/test_promote")
+        sm = OpenWhiskExtendedStateMachine.from_config(config)
+        ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
+        ctx.workload_manager = WorkloadManager.from_config(ctx)
+        ctx.lifecycle_manager = LifecycleManager(ctx, state_machine=sm)
+        ctx.dispatcher = ShardingContainerPoolBalancer(ctx)
+        ctx.cluster_manager.set_context(ctx)
+        ctx.monitor_manager = MonitorManager(ctx)
+        autoscaler = OpenWhiskPoolAutoscaler(ctx, reconcile_interval=100.0)
+        ctx.autoscaling_manager = autoscaler
+        return ctx
+
+    def test_find_promotable_prefers_deepest(self):
+        """find_promotable_instance should return the deepest instance (closest to warm)."""
+        ctx = self._make_ctx_with_pool({"prewarm": 1, "code_loaded": 1})
+        lm = ctx.lifecycle_manager
+        node = ctx.cluster_manager.get_node("node-0")
+
+        ctx.cluster_manager.start_all()
+        ctx.autoscaling_manager.start()
+
+        # Let pool fill: prewarm takes 0.3s, code_loaded takes 0.3+0.4=0.7s
+        ctx.env.run(until=2.0)
+
+        promotable = lm.find_promotable_instance(node, "svc-ext")
+        assert promotable is not None
+        # Should prefer code_loaded over prewarm (deeper)
+        assert promotable.state == "code_loaded"
+
+    def test_promote_faster_than_cold_start(self):
+        """Promoting code_loaded→warm (0.2s) should be faster than full cold start (0.9s)."""
+        ctx = self._make_ctx_with_pool({"code_loaded": 1})
+        lm = ctx.lifecycle_manager
+        node = ctx.cluster_manager.get_node("node-0")
+
+        ctx.cluster_manager.start_all()
+        ctx.autoscaling_manager.start()
+
+        # Let code_loaded instance be created (0.7s)
+        ctx.env.run(until=2.0)
+
+        inst = lm.find_promotable_instance(node, "svc-ext")
+        assert inst is not None
+        assert inst.state == "code_loaded"
+
+        t_before = ctx.env.now
+        promote_proc = lm.promote_instance(node, inst)
+        ctx.env.run(until=ctx.env.now + 1.0)
+
+        assert inst.state == "warm"
+        promote_time = inst.state_entered_at - t_before
+        # code_loaded→warm = 0.2s, much less than full cold start = 0.9s
+        assert promote_time < 0.5, f"Promote took {promote_time}s, expected ~0.2s"
+
+    def test_promote_triggers_pool_refill(self):
+        """After promoting an instance, the pool should be refilled reactively."""
+        ctx = self._make_ctx_with_pool({"code_loaded": 2})
+        lm = ctx.lifecycle_manager
+        node = ctx.cluster_manager.get_node("node-0")
+
+        ctx.cluster_manager.start_all()
+        ctx.autoscaling_manager.start()
+
+        # Let 2 code_loaded instances be created
+        ctx.env.run(until=2.0)
+        code_loaded = [i for i in lm.get_instances_for_node("node-0") if i.state == "code_loaded"]
+        assert len(code_loaded) >= 2
+
+        # Promote one
+        inst = code_loaded[0]
+        lm.promote_instance(node, inst)
+        # Run long enough for the reactive fill to create a replacement
+        ctx.env.run(until=5.0)
+
+        code_loaded_after = [i for i in lm.get_instances_for_node("node-0") if i.state == "code_loaded"]
+        # Should be back to 2 (1 remaining + 1 replacement)
+        assert len(code_loaded_after) >= 2, (
+            f"Expected >= 2 code_loaded after refill, got {len(code_loaded_after)}"
+        )
+
+    def test_no_promotable_when_all_mid_transition(self):
+        """Instances still transitioning (target_state != None) should not be promotable."""
+        ctx = self._make_ctx_with_pool({"code_loaded": 1})
+        lm = ctx.lifecycle_manager
+        node = ctx.cluster_manager.get_node("node-0")
+
+        ctx.cluster_manager.start_all()
+        ctx.autoscaling_manager.start()
+
+        # Run very briefly — instance is still mid-transition
+        ctx.env.run(until=0.1)
+
+        promotable = lm.find_promotable_instance(node, "svc-ext")
+        assert promotable is None
