@@ -141,10 +141,15 @@ class Node:
         timeout_event = self.env.timeout(max(remaining, 0))
 
         result = yield exec_event | timeout_event
+
+        # Release resources (finish_execution handles CPU, slots released here)
+        lm.finish_execution(instance, invocation)
+        instance.slots.release(req)
+
         if exec_event in result:
             # Normal completion
-            lm.finish_execution(instance, invocation)
-            instance.slots.release(req)
+            invocation.status = "completed"
+            self._ctx.request_table.finalize(invocation)
             self.logger.debug(
                 "t=%.3f | %s | completed %s (cold=%s, duration=%.3f)",
                 self.env.now,
@@ -154,12 +159,11 @@ class Node:
                 service_time,
             )
         else:
-            # Timeout during execution — abort and release resources
-            lm.finish_execution(instance, invocation)
-            instance.slots.release(req)
+            # Timeout during execution
             invocation.timed_out = True
             invocation.drop_reason = "timeout"
             invocation.status = "timed_out"
+            self._ctx.request_table.finalize(invocation)
             self.logger.debug(
                 "t=%.3f | %s | TIMEOUT %s (elapsed=%.3f, limit=%.3f)",
                 self.env.now,
@@ -176,6 +180,7 @@ class Node:
         invocation.drop_reason = "timeout"
         invocation.status = "timed_out"
         invocation.completion_time = self.env.now
+        self._ctx.request_table.finalize(invocation)
         self.logger.debug(
             "t=%.3f | %s | TIMEOUT (pre-exec) %s",
             self.env.now,

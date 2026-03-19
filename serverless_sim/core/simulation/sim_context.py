@@ -5,6 +5,8 @@ from typing import Any, Optional
 
 import simpy
 
+from serverless_sim.workload.request_store import RequestStore
+
 
 @dataclass
 class SimContext:
@@ -26,5 +28,5 @@ class SimContext:
     controller: Optional[Any] = None
     export_manager: Optional[Any] = None
 
-    # Central request table
-    request_table: dict = field(default_factory=dict)
+    # Central request store (replaces plain dict for memory efficiency)
+    request_table: RequestStore = field(default_factory=RequestStore)

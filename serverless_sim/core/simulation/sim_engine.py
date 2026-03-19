@@ -75,16 +75,17 @@ class SimulationEngine:
         self.ctx.logger.info("SimulationEngine: shutdown complete")
 
     def _mark_truncated(self) -> None:
-        """Sweep request table and mark non-terminal requests as truncated."""
-        terminal_statuses = {"completed", "timed_out"}
+        """Sweep in-flight requests and mark them as truncated."""
+        # Collect list first since finalize() mutates _active
+        in_flight = list(self.ctx.request_table.values())
         truncated_count = 0
-        for inv in self.ctx.request_table.values():
-            if inv.status not in terminal_statuses and not inv.dropped:
-                inv.status = "truncated"
-                inv.drop_reason = "simulation_end"
-                if inv.completion_time is None:
-                    inv.completion_time = self.ctx.env.now
-                truncated_count += 1
+        for inv in in_flight:
+            inv.status = "truncated"
+            inv.drop_reason = "simulation_end"
+            if inv.completion_time is None:
+                inv.completion_time = self.ctx.env.now
+            self.ctx.request_table.finalize(inv)
+            truncated_count += 1
         if truncated_count > 0:
             self.ctx.logger.info(
                 "SimulationEngine: marked %d in-flight requests as truncated",

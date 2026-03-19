@@ -10,7 +10,11 @@ if TYPE_CHECKING:
 
 
 class SystemMetricsExporter:
-    """Exports system_metrics.csv from MonitorManager's metric store."""
+    """Exports system_metrics.csv from MonitorManager's metric store.
+
+    Streams rows directly from the ring buffers without building
+    an intermediate lookup dict in memory.
+    """
 
     def __init__(self, ctx: SimContext):
         self.ctx = ctx
@@ -23,21 +27,14 @@ class SystemMetricsExporter:
         if not metric_names:
             return ""
 
-        # Collect all unique timestamps
-        all_timestamps = set()
-        for name in metric_names:
-            for t, _ in store.get_all_entries(name):
-                all_timestamps.add(t)
-        timestamps = sorted(all_timestamps)
-
+        timestamps = store.iter_timestamps()
         if not timestamps:
             return ""
 
-        # Build lookup: (metric, time) → value
-        lookup = {}
+        # Build per-metric index once — bounded by ring buffer maxlen
+        per_metric: dict[str, dict[float, float]] = {}
         for name in metric_names:
-            for t, v in store.get_all_entries(name):
-                lookup[(name, t)] = v
+            per_metric[name] = {t: v for t, v in store.get_all_entries(name)}
 
         header = ["time"] + metric_names
         path = os.path.join(self.ctx.run_dir, "system_metrics.csv")
@@ -47,7 +44,7 @@ class SystemMetricsExporter:
         for t in timestamps:
             row = [f"{t:.3f}"]
             for name in metric_names:
-                val = lookup.get((name, t), "")
+                val = per_metric[name].get(t, "")
                 row.append(f"{val:.6f}" if isinstance(val, float) else str(val))
             writer.write_row(row)
 

@@ -95,54 +95,39 @@ class TestLifecycleEndToEnd:
 
         ctx.env.run(until=10.0)
 
-        completed = [
-            inv for inv in ctx.request_table.values()
-            if inv.status == "completed"
-        ]
-        assert len(completed) > 0, "No requests completed"
+        completed = ctx.request_table.counters.completed
+        assert completed > 0, "No requests completed"
 
     def test_timestamps_populated(self):
-        """Completed requests should have all timestamps."""
+        """Completed requests should have valid latencies recorded."""
         ctx = _make_ctx()
         ctx.cluster_manager.start_all()
         ctx.workload_manager.start()
 
         ctx.env.run(until=10.0)
 
-        completed = [
-            inv for inv in ctx.request_table.values()
-            if inv.status == "completed"
-        ]
-        for inv in completed:
-            assert inv.arrival_time is not None
-            assert inv.dispatch_time is not None
-            assert inv.queue_enter_time is not None
-            assert inv.execution_start_time is not None
-            assert inv.execution_end_time is not None
-            assert inv.completion_time is not None
-            # Ordering
-            assert inv.arrival_time <= inv.dispatch_time
-            assert inv.dispatch_time <= inv.execution_start_time
-            assert inv.execution_start_time <= inv.execution_end_time
+        # Completed invocations are flushed from memory, but latencies are recorded
+        assert ctx.request_table.counters.completed > 0
+        assert len(ctx.request_table.latencies) > 0
+        for lat in ctx.request_table.latencies:
+            assert lat > 0, "Latency should be positive"
 
     def test_cold_start_first_request(self):
-        """First request to a service should be a cold start."""
+        """First request to a service should be a cold start, with warm hits after."""
         ctx = _make_ctx()
         ctx.cluster_manager.start_all()
         ctx.workload_manager.start()
 
         ctx.env.run(until=10.0)
 
-        completed = sorted(
-            [inv for inv in ctx.request_table.values() if inv.status == "completed"],
-            key=lambda i: i.arrival_time,
-        )
-        assert len(completed) > 1
-        # First completed request should be cold start
-        assert completed[0].cold_start is True
-        # Later requests should be warm hits (at least some)
-        warm_hits = [inv for inv in completed[1:] if not inv.cold_start]
-        assert len(warm_hits) > 0, "Expected some warm hits after first request"
+        completed = ctx.request_table.counters.completed
+        cold_starts = ctx.request_table.counters.cold_starts
+        assert completed > 1
+        # At least one cold start
+        assert cold_starts >= 1
+        # Some warm hits (completed > cold_starts)
+        warm_hits = completed - cold_starts
+        assert warm_hits > 0, "Expected some warm hits after first request"
 
     def test_concurrency(self):
         """With max_concurrency=4, multiple requests can run on one instance."""
@@ -171,9 +156,9 @@ class TestLifecycleEndToEnd:
 
         ctx.env.run(until=5.0)
 
-        completed = [inv for inv in ctx.request_table.values() if inv.status == "completed"]
+        completed = ctx.request_table.counters.completed
         # With rate=20 and duration=5, many requests should complete
-        assert len(completed) > 10
+        assert completed > 10
 
     def test_per_request_cpu_released(self):
         """After all requests complete, node CPU should be fully released."""

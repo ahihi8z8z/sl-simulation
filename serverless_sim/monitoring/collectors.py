@@ -15,42 +15,27 @@ class BaseCollector:
 
 
 class RequestCollector(BaseCollector):
-    """Collects request-level metrics from the request table."""
+    """Collects request-level metrics from the request store counters."""
 
     def collect(self, env_time: float, ctx: SimContext) -> dict[str, float]:
-        table = ctx.request_table
-        total = len(table)
-        completed = sum(1 for inv in table.values() if inv.status == "completed")
-        dropped = sum(1 for inv in table.values() if inv.dropped)
-        timed_out = sum(1 for inv in table.values() if inv.timed_out)
-        truncated = sum(1 for inv in table.values() if inv.status == "truncated")
-        cold_starts = sum(1 for inv in table.values() if inv.cold_start and inv.status == "completed")
-        in_flight = sum(
-            1 for inv in table.values()
-            if inv.status in ("queued", "arrived") or
-            (inv.execution_start_time is not None and inv.execution_end_time is None)
-        )
-
-        # Latency percentiles for completed requests
-        latencies = sorted(
-            inv.completion_time - inv.arrival_time
-            for inv in table.values()
-            if inv.status == "completed" and inv.completion_time and inv.arrival_time
-        )
+        store = ctx.request_table
+        c = store.counters
 
         metrics = {
-            "request.total": total,
-            "request.completed": completed,
-            "request.dropped": dropped,
-            "request.timed_out": timed_out,
-            "request.cold_starts": cold_starts,
-            "request.truncated": truncated,
-            "request.in_flight": in_flight,
+            "request.total": c.total,
+            "request.completed": c.completed,
+            "request.dropped": c.dropped,
+            "request.timed_out": c.timed_out,
+            "request.cold_starts": c.cold_starts,
+            "request.truncated": c.truncated,
+            "request.in_flight": store.active_count,
         }
 
+        # store.latencies is kept sorted via bisect.insort — no sort needed
+        latencies = store.latencies
         if latencies:
             n = len(latencies)
-            metrics["request.latency_mean"] = sum(latencies) / n
+            metrics["request.latency_mean"] = store._latency_sum / n
             metrics["request.latency_p50"] = latencies[n // 2]
             metrics["request.latency_p95"] = latencies[int(n * 0.95)]
             metrics["request.latency_p99"] = latencies[int(n * 0.99)]

@@ -162,5 +162,5 @@ class TestSimulationEngine:
         engine.setup()
         engine.run()
 
-        completed = sum(1 for inv in ctx.request_table.values() if inv.status == "completed")
+        completed = ctx.request_table.counters.completed
         assert completed > 0

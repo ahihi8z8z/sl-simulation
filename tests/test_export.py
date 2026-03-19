@@ -54,14 +54,17 @@ def _run_sim(export_mode: int):
     ctx.cluster_manager.set_context(ctx)
     ctx.monitor_manager = MonitorManager(ctx, interval=1.0, max_history=100)
 
+    # ExportManager must be created BEFORE running the simulation so that
+    # mode 2 streaming trace captures all requests as they finalize.
+    em = ExportManager(ctx, mode=export_mode)
+    ctx.export_manager = em
+
     ctx.cluster_manager.start_all()
     ctx.workload_manager.start()
     ctx.monitor_manager.start()
 
     ctx.env.run(until=5.0)
 
-    em = ExportManager(ctx, mode=export_mode)
-    ctx.export_manager = em
     paths = em.export()
     return ctx, run_dir, paths
 

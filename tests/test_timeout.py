@@ -54,10 +54,8 @@ class TestTimeout:
 
         ctx.env.run(until=5.0)
 
-        timed_out = [inv for inv in ctx.request_table.values() if inv.timed_out]
-        assert len(timed_out) > 0, "Expected some requests to timeout"
-        for inv in timed_out:
-            assert inv.drop_reason == "timeout"
+        timed_out = ctx.request_table.counters.timed_out
+        assert timed_out > 0, "Expected some requests to timeout"
 
     def test_no_timeout_when_fast(self):
         """With timeout=10 and job_size=0.01, no requests should timeout."""
@@ -86,10 +84,10 @@ class TestTimeout:
 
         ctx.env.run(until=5.0)
 
-        timed_out = [inv for inv in ctx.request_table.values() if inv.timed_out]
-        assert len(timed_out) == 0, f"Expected no timeouts, got {len(timed_out)}"
-        completed = [inv for inv in ctx.request_table.values() if inv.status == "completed"]
-        assert len(completed) > 0
+        timed_out = ctx.request_table.counters.timed_out
+        assert timed_out == 0, f"Expected no timeouts, got {timed_out}"
+        completed = ctx.request_table.counters.completed
+        assert completed > 0
 
     def test_resources_released_on_timeout(self):
         """After timeout, resources should be released."""

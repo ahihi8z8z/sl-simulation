@@ -75,6 +75,7 @@ class ShardingContainerPoolBalancer:
         invocation.drop_reason = reason
         invocation.status = "dropped"
         invocation.completion_time = self.ctx.env.now
+        self.ctx.request_table.finalize(invocation)
         self.logger.debug(
             "t=%.3f | DROP | %s reason=%s",
             self.ctx.env.now,

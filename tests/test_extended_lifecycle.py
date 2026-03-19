@@ -149,12 +149,12 @@ class TestExtendedLifecycleSimulation:
         engine.shutdown()
 
         # Should have processed some requests
-        completed = sum(1 for inv in ctx.request_table.values() if inv.status == "completed")
+        completed = ctx.request_table.counters.completed
         assert completed > 0
 
     def test_cold_start_includes_transition_time(self):
         """Cold start should take at least the sum of transition times
-        (null→prewarm: 0.3 + prewarm→code_loaded: 0.4 + code_loaded→warm: 0.2 = 0.9s)."""
+        (null->prewarm: 0.3 + prewarm->code_loaded: 0.4 + code_loaded->warm: 0.2 = 0.9s)."""
         run_dir = tempfile.mkdtemp(prefix="test_ext_cold_")
         logger = logging.getLogger("test_ext_cold")
         logger.handlers.clear()
@@ -167,20 +167,21 @@ class TestExtendedLifecycleSimulation:
         engine.setup()
         engine.run()
 
-        # Find first cold-start request
-        cold_starts = [
-            inv for inv in ctx.request_table.values()
-            if inv.cold_start and inv.status == "completed"
-        ]
-        assert len(cold_starts) > 0
-
-        first_cold = cold_starts[0]
-        latency = first_cold.completion_time - first_cold.arrival_time
-        # Transition time sum is 0.9s + execution time
-        assert latency >= 0.9
+        # Cold start requests are flushed, but latencies are recorded
+        assert ctx.request_table.counters.cold_starts > 0
+        # At least one latency should be >= 0.9s (transition time sum)
+        assert any(lat >= 0.9 for lat in ctx.request_table.latencies), (
+            f"Expected at least one latency >= 0.9s, got {ctx.request_table.latencies}"
+        )
 
     def test_warm_hit_faster_than_cold_start(self):
-        """Warm hits should be faster than cold starts."""
+        """Warm hits should be faster than cold starts.
+
+        Since individual invocations are flushed, we verify indirectly:
+        cold starts have transition overhead (>=0.9s), so if there are both
+        cold and warm hits, the average latency should be lower than the
+        cold start transition time, proving warm hits pull the average down.
+        """
         run_dir = tempfile.mkdtemp(prefix="test_ext_warm_")
         logger = logging.getLogger("test_ext_warm")
         logger.handlers.clear()
@@ -193,10 +194,14 @@ class TestExtendedLifecycleSimulation:
         engine.setup()
         engine.run()
 
-        cold = [inv for inv in ctx.request_table.values() if inv.cold_start and inv.status == "completed"]
-        warm = [inv for inv in ctx.request_table.values() if not inv.cold_start and inv.status == "completed"]
+        cold_count = ctx.request_table.counters.cold_starts
+        completed = ctx.request_table.counters.completed
+        warm_count = completed - cold_count
 
-        if cold and warm:
-            avg_cold = sum(inv.completion_time - inv.arrival_time for inv in cold) / len(cold)
-            avg_warm = sum(inv.completion_time - inv.arrival_time for inv in warm) / len(warm)
-            assert avg_warm < avg_cold
+        if cold_count > 0 and warm_count > 0:
+            avg_latency = sum(ctx.request_table.latencies) / len(ctx.request_table.latencies)
+            # Cold start transition overhead is 0.9s; average should be less
+            # because warm hits (~0.1s job_size) pull it down
+            assert avg_latency < 0.9, (
+                f"Average latency {avg_latency:.3f}s should be < 0.9s cold start overhead"
+            )

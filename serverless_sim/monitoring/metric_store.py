@@ -47,5 +47,26 @@ class MetricStore:
             return []
         return list(buf)
 
+    def iter_timestamps(self) -> list[float]:
+        """Return sorted unique timestamps across all metrics."""
+        seen: set[float] = set()
+        for buf in self._data.values():
+            for t, _ in buf:
+                seen.add(t)
+        return sorted(seen)
+
+    def get_at(self, metric_name: str, timestamp: float) -> Any:
+        """Return value at exact timestamp, or None.
+
+        Linear scan on bounded deque — fast for ring buffers.
+        """
+        buf = self._data.get(metric_name)
+        if not buf:
+            return None
+        for t, v in buf:
+            if t == timestamp:
+                return v
+        return None
+
     def __len__(self) -> int:
         return sum(len(buf) for buf in self._data.values())

@@ -24,19 +24,18 @@ class SummaryWriter:
         run_dir = self.ctx.run_dir
         path = os.path.join(run_dir, "summary.txt")
 
-        table = self.ctx.request_table
-        total = len(table)
-        completed = sum(1 for inv in table.values() if inv.status == "completed")
-        dropped = sum(1 for inv in table.values() if inv.dropped)
-        timed_out = sum(1 for inv in table.values() if inv.timed_out)
-        truncated = sum(1 for inv in table.values() if inv.status == "truncated")
-        cold_starts = sum(1 for inv in table.values() if inv.cold_start and inv.status == "completed")
+        store = self.ctx.request_table
+        c = store.counters
+        total = c.total
+        completed = c.completed
+        dropped = c.dropped
+        timed_out = c.timed_out
+        truncated = c.truncated
+        cold_starts = c.cold_starts
 
-        # Latency stats for completed requests
-        latencies = []
-        for inv in table.values():
-            if inv.status == "completed" and inv.completion_time and inv.arrival_time:
-                latencies.append(inv.completion_time - inv.arrival_time)
+        # store.latencies is already sorted
+        latencies = store.latencies
+        latency_sum = store._latency_sum
 
         config = self.ctx.config
         duration = config["simulation"]["duration"]
@@ -62,8 +61,7 @@ class SummaryWriter:
             f.write(f"Cold starts: {cold_starts}\n")
 
             if latencies:
-                latencies.sort()
-                avg = sum(latencies) / len(latencies)
+                avg = latency_sum / len(latencies)
                 p50 = latencies[len(latencies) // 2]
                 p95 = latencies[int(len(latencies) * 0.95)]
                 p99 = latencies[int(len(latencies) * 0.99)]

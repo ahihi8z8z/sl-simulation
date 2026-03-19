@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import logging
+import os
 from typing import TYPE_CHECKING
 
 from serverless_sim.export.summary_writer import SummaryWriter
 from serverless_sim.export.system_metrics_exporter import SystemMetricsExporter
-from serverless_sim.export.request_trace_exporter import RequestTraceExporter
 
 if TYPE_CHECKING:
     from serverless_sim.core.simulation.sim_context import SimContext
@@ -16,7 +16,7 @@ class ExportManager:
 
     Mode 0: summary.txt only
     Mode 1: summary.txt + system_metrics.csv
-    Mode 2: summary.txt + system_metrics.csv + request_trace.csv
+    Mode 2: summary.txt + system_metrics.csv + request_trace.csv (streamed)
     """
 
     def __init__(self, ctx: SimContext, mode: int = 0):
@@ -24,9 +24,21 @@ class ExportManager:
         self.mode = mode
         self.logger = ctx.logger
 
+        # Mode 2: enable streaming trace on the request store
+        if self.mode >= 2:
+            ctx.request_table.enable_trace(ctx.run_dir)
+
     def export(self, wall_clock_seconds: float | None = None) -> list[str]:
         """Run all exporters based on mode. Returns list of written file paths."""
         paths = []
+
+        # Close streaming trace before writing summary (flush remaining rows)
+        if self.mode >= 2:
+            self.ctx.request_table.close_trace()
+            trace_path = os.path.join(self.ctx.run_dir, "request_trace.csv")
+            if os.path.exists(trace_path):
+                paths.append(trace_path)
+                self.logger.info("Wrote %s", trace_path)
 
         # Mode 0+: always write summary
         sw = SummaryWriter(self.ctx)
@@ -37,13 +49,6 @@ class ExportManager:
         if self.mode >= 1:
             sme = SystemMetricsExporter(self.ctx)
             p = sme.export()
-            if p:
-                paths.append(p)
-                self.logger.info("Wrote %s", p)
-
-        if self.mode >= 2:
-            rte = RequestTraceExporter(self.ctx)
-            p = rte.export()
             if p:
                 paths.append(p)
                 self.logger.info("Wrote %s", p)

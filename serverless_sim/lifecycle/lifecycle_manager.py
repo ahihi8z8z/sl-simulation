@@ -137,7 +137,12 @@ class LifecycleManager:
         invocation.assigned_instance_id = instance.instance_id
 
     def finish_execution(self, instance: ContainerInstance, invocation: Invocation) -> None:
-        """Release per-request CPU, transition back to warm if idle."""
+        """Release per-request CPU, transition back to warm if idle.
+
+        This only handles resource cleanup.  The caller is responsible
+        for setting the final ``invocation.status`` and calling
+        ``request_table.finalize()``.
+        """
         instance.active_requests -= 1
         instance.last_used_at = self.ctx.env.now
 
@@ -155,8 +160,6 @@ class LifecycleManager:
         if instance.cold_start:
             invocation.cold_start = True
             instance.cold_start = False
-
-        invocation.status = "completed"
 
         # If no more active requests, go back to warm
         if instance.active_requests == 0:
