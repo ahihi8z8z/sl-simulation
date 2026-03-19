@@ -9,7 +9,6 @@
       "service_id": "svc-api",
       "arrival_rate": 10.0,
       "job_size": 0.05,
-      "timeout": 5.0,
       "memory": 256,
       "cpu": 0.5,
       "max_concurrency": 8,
@@ -20,7 +19,6 @@
       "service_id": "svc-worker",
       "arrival_rate": 2.0,
       "job_size": 1.0,
-      "timeout": 30.0,
       "memory": 1024,
       "cpu": 2.0,
       "max_concurrency": 2,
@@ -31,7 +29,6 @@
       "service_id": "svc-cron",
       "arrival_rate": 0.5,
       "job_size": 0.5,
-      "timeout": 10.0,
       "memory": 512,
       "cpu": 1.0,
       "max_concurrency": 1,
@@ -44,12 +41,14 @@
       {
         "node_id": "node-0",
         "cpu_capacity": 16.0,
-        "memory_capacity": 32768
+        "memory_capacity": 32768,
+        "max_queue_depth": 200
       },
       {
         "node_id": "node-1",
         "cpu_capacity": 8.0,
-        "memory_capacity": 16384
+        "memory_capacity": 16384,
+        "max_queue_depth": 100
       }
     ]
   },

@@ -10,7 +10,6 @@ class ServiceClass:
     arrival_mode: str = "poisson"
     arrival_rate: float = 1.0
     job_size: float = 1.0
-    timeout: float = 30.0
     max_concurrency: int = 1
     memory: float = 256.0
     cpu: float = 1.0
@@ -26,7 +25,6 @@ class ServiceClass:
             arrival_mode=cfg.get("arrival_mode", "poisson"),
             arrival_rate=cfg["arrival_rate"],
             job_size=cfg["job_size"],
-            timeout=cfg["timeout"],
             max_concurrency=cfg["max_concurrency"],
             memory=cfg["memory"],
             cpu=cfg["cpu"],

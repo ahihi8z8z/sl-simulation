@@ -6,7 +6,7 @@ REQUIRED_TOP_KEYS = {"simulation", "services", "cluster"}
 
 REQUIRED_SIMULATION_KEYS = {"duration", "seed"}
 
-REQUIRED_SERVICE_KEYS = {"service_id", "arrival_rate", "job_size", "timeout", "memory", "cpu", "max_concurrency"}
+REQUIRED_SERVICE_KEYS = {"service_id", "arrival_rate", "job_size", "memory", "cpu", "max_concurrency"}
 
 REQUIRED_CLUSTER_KEYS = {"nodes"}
 

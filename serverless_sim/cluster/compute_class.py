@@ -8,3 +8,4 @@ class ComputeClass:
     class_id: str = ""
     serving_model_type: str = "fixed_rate"
     processing_factor: float = 1.0
+    max_queue_depth: int = 0  # 0 = unlimited

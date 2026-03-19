@@ -29,7 +29,6 @@ class SummaryWriter:
         total = c.total
         completed = c.completed
         dropped = c.dropped
-        timed_out = c.timed_out
         truncated = c.truncated
         cold_starts = c.cold_starts
 
@@ -56,7 +55,6 @@ class SummaryWriter:
             f.write(f"Total requests: {total}\n")
             f.write(f"Completed: {completed}\n")
             f.write(f"Dropped: {dropped}\n")
-            f.write(f"Timed out: {timed_out}\n")
             f.write(f"Truncated: {truncated}\n")
             f.write(f"Cold starts: {cold_starts}\n")
 
@@ -75,7 +73,6 @@ class SummaryWriter:
                 f.write(f"\n--- Rates ---\n")
                 f.write(f"Throughput: {completed / duration:.2f} req/s\n")
                 f.write(f"Drop rate: {dropped / total * 100:.1f}%\n")
-                f.write(f"Timeout rate: {timed_out / total * 100:.1f}%\n")
                 f.write(f"Cold start rate: {cold_starts / max(completed, 1) * 100:.1f}%\n")
 
         return path

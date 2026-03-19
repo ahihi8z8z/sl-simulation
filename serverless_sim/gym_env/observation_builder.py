@@ -8,7 +8,6 @@ DEFAULT_OBS_METRICS = [
     "cluster.memory_utilization",
     "request.completed",
     "request.dropped",
-    "request.timed_out",
     "request.in_flight",
     "request.cold_starts",
     "lifecycle.instances_total",

@@ -79,7 +79,6 @@ class PoissonFixedSizeGenerator(BaseGenerator):
                 service_id=service.service_id,
                 arrival_time=env.now,
                 job_size=service.job_size,
-                timeout=service.timeout,
                 status="arrived",
             )
 

@@ -26,7 +26,6 @@ EXTENDED_CONFIG = {
             "service_id": "svc-ext",
             "arrival_rate": 3.0,
             "job_size": 0.1,
-            "timeout": 15.0,
             "memory": 512,
             "cpu": 1.0,
             "max_concurrency": 4,

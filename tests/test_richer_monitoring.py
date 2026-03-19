@@ -31,7 +31,6 @@ MULTI_SERVICE_CONFIG = {
             "service_id": "svc-api",
             "arrival_rate": 10.0,
             "job_size": 0.05,
-            "timeout": 5.0,
             "memory": 256,
             "cpu": 0.5,
             "max_concurrency": 8,
@@ -42,7 +41,6 @@ MULTI_SERVICE_CONFIG = {
             "service_id": "svc-worker",
             "arrival_rate": 2.0,
             "job_size": 0.5,
-            "timeout": 30.0,
             "memory": 1024,
             "cpu": 2.0,
             "max_concurrency": 2,
@@ -162,7 +160,7 @@ class TestAllMetricFamilies:
         ctx, _ = _run_multi_service_sim()
         store = ctx.monitor_manager.store
         for metric in ["request.total", "request.completed", "request.dropped",
-                        "request.timed_out", "request.cold_starts", "request.in_flight"]:
+                        "request.cold_starts", "request.in_flight"]:
             assert store.get_latest(metric) is not None, f"Missing metric: {metric}"
 
     def test_cluster_metrics(self):

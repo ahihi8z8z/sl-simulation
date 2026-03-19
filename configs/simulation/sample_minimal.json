@@ -9,7 +9,6 @@
       "service_id": "svc-hello",
       "arrival_rate": 5.0,
       "job_size": 0.1,
-      "timeout": 10.0,
       "memory": 256,
       "cpu": 1.0,
       "max_concurrency": 4,
@@ -22,7 +21,8 @@
       {
         "node_id": "node-0",
         "cpu_capacity": 8.0,
-        "memory_capacity": 8192
+        "memory_capacity": 8192,
+        "max_queue_depth": 100
       }
     ]
   },

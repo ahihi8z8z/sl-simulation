@@ -27,7 +27,6 @@ SLOW_SERVICE_CONFIG = {
             "service_id": "svc-slow",
             "arrival_rate": 5.0,
             "job_size": 2.0,       # 2s service time — many will be in-flight at t=3
-            "timeout": 30.0,
             "memory": 256,
             "cpu": 1.0,
             "max_concurrency": 1,
@@ -187,7 +186,7 @@ class TestTruncatedSweep:
         assert ctx.request_table.active_count == 0
         # All requests should be accounted for via counters
         c = ctx.request_table.counters
-        assert c.completed + c.timed_out + c.truncated == c.total
+        assert c.completed + c.truncated == c.total - c.dropped
 
     def test_truncated_has_completion_time(self):
         """Truncated requests should be counted after _mark_truncated."""
@@ -203,7 +202,7 @@ class TestTruncatedSweep:
         assert ctx.request_table.counters.truncated > 0
 
     def test_truncated_does_not_affect_completed(self):
-        """Completed and timed_out requests should not be changed by truncation sweep."""
+        """Completed requests should not be changed by truncation sweep."""
         ctx = _make_ctx(SLOW_SERVICE_CONFIG)
         ctx.cluster_manager.start_all()
         ctx.workload_manager.start(stop_time=3.0)
@@ -211,14 +210,12 @@ class TestTruncatedSweep:
 
         # Count terminal states before sweep (already finalized via counters)
         completed_before = ctx.request_table.counters.completed
-        timed_out_before = ctx.request_table.counters.timed_out
 
         engine = SimulationEngine(ctx)
         engine._mark_truncated()
 
-        # Completed and timed_out counts should not change after truncation sweep
+        # Completed count should not change after truncation sweep
         assert ctx.request_table.counters.completed == completed_before
-        assert ctx.request_table.counters.timed_out == timed_out_before
 
 
 # ------------------------------------------------------------------ #

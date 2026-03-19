@@ -51,6 +51,8 @@ class ShardingContainerPoolBalancer:
         for offset in range(n):
             idx = (primary_idx + offset) % n
             node = self._nodes[idx]
+            if node.queue_is_full:
+                continue
             if node.available.can_fit(resource_req):
                 invocation.assigned_node_id = node.node_id
                 invocation.dispatch_time = self.ctx.env.now

@@ -5,7 +5,6 @@
   "idle_timeout_max": 120.0,
   "reward": {
     "drop_penalty": -1.0,
-    "timeout_penalty": -1.0,
     "cold_start_penalty": -0.1,
     "latency_penalty": -0.5,
     "resource_penalty": -0.1,

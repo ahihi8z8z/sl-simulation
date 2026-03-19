@@ -25,7 +25,6 @@ class RequestCollector(BaseCollector):
             "request.total": c.total,
             "request.completed": c.completed,
             "request.dropped": c.dropped,
-            "request.timed_out": c.timed_out,
             "request.cold_starts": c.cold_starts,
             "request.truncated": c.truncated,
             "request.in_flight": store.active_count,
@@ -69,32 +68,25 @@ class ClusterCollector(BaseCollector):
 
 
 class LifecycleCollector(BaseCollector):
-    """Collects lifecycle instance metrics per state and per service."""
+    """Collects lifecycle instance metrics per state and per service.
+
+    Dynamically counts instances in every state (including extended
+    states like ``code_loaded``), not just the default three.
+    """
 
     def collect(self, env_time: float, ctx: SimContext) -> dict[str, float]:
         if ctx.lifecycle_manager is None:
             return {}
 
         total_instances = 0
-        warm_instances = 0
-        running_instances = 0
-        prewarm_instances = 0
-        evicted_instances = 0
+        per_state: dict[str, int] = {}
         per_service: dict[str, dict[str, int]] = {}
 
         for node in ctx.cluster_manager.get_enabled_nodes():
             instances = ctx.lifecycle_manager.get_instances_for_node(node.node_id)
             for inst in instances:
-                if inst.state == "evicted":
-                    evicted_instances += 1
-                    continue
                 total_instances += 1
-                if inst.state == "warm":
-                    warm_instances += 1
-                elif inst.state == "running":
-                    running_instances += 1
-                elif inst.state == "prewarm":
-                    prewarm_instances += 1
+                per_state[inst.state] = per_state.get(inst.state, 0) + 1
 
                 # Per-service counts
                 svc_counts = per_service.setdefault(inst.service_id, {"total": 0, "running": 0})
@@ -102,13 +94,14 @@ class LifecycleCollector(BaseCollector):
                 if inst.state == "running":
                     svc_counts["running"] += 1
 
-        metrics = {
+        metrics: dict[str, float] = {
             "lifecycle.instances_total": total_instances,
-            "lifecycle.instances_warm": warm_instances,
-            "lifecycle.instances_running": running_instances,
-            "lifecycle.instances_prewarm": prewarm_instances,
-            "lifecycle.instances_evicted": evicted_instances,
+            "lifecycle.instances_evicted": ctx.lifecycle_manager._evicted_count,
         }
+
+        # Per-state counts (all states, including extended)
+        for state, count in per_state.items():
+            metrics[f"lifecycle.instances_{state}"] = count
 
         for svc_id, counts in per_service.items():
             metrics[f"lifecycle.{svc_id}.instances_total"] = counts["total"]

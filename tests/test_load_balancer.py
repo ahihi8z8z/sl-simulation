@@ -18,7 +18,6 @@ SAMPLE_CONFIG = {
             "service_id": "svc-a",
             "arrival_rate": 10.0,
             "job_size": 0.5,
-            "timeout": 5.0,
             "memory": 256,
             "cpu": 1.0,
             "max_concurrency": 2,
@@ -51,7 +50,7 @@ class TestShardingBalancer:
         ctx = _make_ctx()
         lb = ShardingContainerPoolBalancer(ctx)
         inv = Invocation(request_id="r1", service_id="svc-a", arrival_time=0.0,
-                         job_size=0.5, timeout=5.0, status="arrived")
+                         job_size=0.5, status="arrived")
         ctx.request_table["r1"] = inv
 
         ok = lb.dispatch(inv)
@@ -68,7 +67,7 @@ class TestShardingBalancer:
         node_ids = set()
         for i in range(10):
             inv = Invocation(request_id=f"r{i}", service_id="svc-a",
-                             arrival_time=0.0, job_size=0.5, timeout=5.0, status="arrived")
+                             arrival_time=0.0, job_size=0.5, status="arrived")
             ctx.request_table[inv.request_id] = inv
             lb.dispatch(inv)
             node_ids.add(inv.assigned_node_id)
@@ -83,7 +82,7 @@ class TestShardingBalancer:
 
         # Figure out primary node for svc-a
         inv0 = Invocation(request_id="probe", service_id="svc-a",
-                          arrival_time=0.0, job_size=0.5, timeout=5.0, status="arrived")
+                          arrival_time=0.0, job_size=0.5, status="arrived")
         ctx.request_table["probe"] = inv0
         lb.dispatch(inv0)
         primary_node_id = inv0.assigned_node_id
@@ -95,7 +94,7 @@ class TestShardingBalancer:
 
         # Next dispatch should fallback
         inv1 = Invocation(request_id="r-fallback", service_id="svc-a",
-                          arrival_time=0.0, job_size=0.5, timeout=5.0, status="arrived")
+                          arrival_time=0.0, job_size=0.5, status="arrived")
         ctx.request_table["r-fallback"] = inv1
         ok = lb.dispatch(inv1)
         assert ok is True
@@ -111,7 +110,7 @@ class TestShardingBalancer:
             node.available = ResourceProfile(cpu=node.available.cpu, memory=0.0)
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
-                         arrival_time=0.0, job_size=0.5, timeout=5.0, status="arrived")
+                         arrival_time=0.0, job_size=0.5, status="arrived")
         ctx.request_table["r-drop"] = inv
         ok = lb.dispatch(inv)
         assert ok is False

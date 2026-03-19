@@ -22,7 +22,6 @@ CONFIG = {
             "service_id": "svc-a",
             "arrival_rate": 5.0,
             "job_size": 0.1,
-            "timeout": 10.0,
             "memory": 256,
             "cpu": 1.0,
             "max_concurrency": 4,

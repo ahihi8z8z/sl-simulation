@@ -53,15 +53,11 @@ class SimulationEngine:
         self.ctx.logger.info("SimulationEngine: simulation finished at t=%.3f", self.ctx.env.now)
 
     def _get_drain_timeout(self) -> float:
-        """Return the drain timeout from config, defaulting to max service timeout."""
+        """Return the drain timeout from config (default 30s)."""
         config_sim = self.ctx.config["simulation"]
         drain = config_sim.get("drain_timeout")
         if drain is not None:
             return float(drain)
-        # Default: max timeout across all services
-        services = self.ctx.config.get("services", [])
-        if services:
-            return max(svc.get("timeout", 30.0) for svc in services)
         return 30.0
 
     def shutdown(self) -> None:

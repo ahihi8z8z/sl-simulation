@@ -18,7 +18,7 @@ from serverless_sim.export.request_trace_exporter import TRACE_HEADER
 if TYPE_CHECKING:
     from serverless_sim.workload.invocation import Invocation
 
-TERMINAL_STATUSES = {"completed", "timed_out", "dropped", "truncated"}
+TERMINAL_STATUSES = {"completed", "dropped", "truncated"}
 
 
 @dataclass
@@ -28,7 +28,6 @@ class RequestCounters:
     total: int = 0
     completed: int = 0
     dropped: int = 0
-    timed_out: int = 0
     truncated: int = 0
     cold_starts: int = 0
 
@@ -89,8 +88,6 @@ class RequestStore:
                 lat = inv.completion_time - inv.arrival_time
                 bisect.insort(self.latencies, lat)
                 self._latency_sum += lat
-        elif status == "timed_out":
-            self.counters.timed_out += 1
         elif status == "dropped":
             self.counters.dropped += 1
         elif status == "truncated":
@@ -148,7 +145,6 @@ class RequestStore:
             inv.assigned_instance_id or "",
             inv.cold_start,
             inv.dropped,
-            inv.timed_out,
             inv.drop_reason or "",
             inv.status,
         ]

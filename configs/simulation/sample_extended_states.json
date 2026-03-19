@@ -9,7 +9,6 @@
       "service_id": "svc-extended",
       "arrival_rate": 3.0,
       "job_size": 0.2,
-      "timeout": 15.0,
       "memory": 512,
       "cpu": 1.0,
       "max_concurrency": 4,
@@ -22,7 +21,8 @@
       {
         "node_id": "node-0",
         "cpu_capacity": 8.0,
-        "memory_capacity": 16384
+        "memory_capacity": 16384,
+        "max_queue_depth": 100
       }
     ]
   },

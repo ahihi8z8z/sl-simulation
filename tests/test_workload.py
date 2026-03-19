@@ -18,7 +18,6 @@ SAMPLE_CONFIG = {
             "service_id": "svc-a",
             "arrival_rate": 10.0,
             "job_size": 0.5,
-            "timeout": 5.0,
             "memory": 256,
             "cpu": 1.0,
             "max_concurrency": 2,
@@ -56,7 +55,6 @@ class TestServiceClass:
         assert svc.service_id == "svc-a"
         assert svc.arrival_rate == 10.0
         assert svc.job_size == 0.5
-        assert svc.timeout == 5.0
         assert svc.memory == 256
         assert svc.cpu == 1.0
         assert svc.max_concurrency == 2
@@ -66,7 +64,6 @@ class TestServiceClass:
             "service_id": "svc-b",
             "arrival_rate": 1.0,
             "job_size": 0.1,
-            "timeout": 3.0,
             "memory": 128,
             "cpu": 0.5,
             "max_concurrency": 1,
@@ -86,7 +83,6 @@ class TestInvocation:
         inv = Invocation(request_id="r1", service_id="svc-a", arrival_time=1.0)
         assert inv.status == "created"
         assert inv.dropped is False
-        assert inv.timed_out is False
         assert inv.cold_start is False
         assert inv.dispatch_time is None
 
@@ -167,9 +163,9 @@ class TestWorkloadManager:
         ctx = _make_ctx()
         wm = WorkloadManager(ctx)
         svc_a = ServiceClass(service_id="svc-a", arrival_rate=5.0, job_size=0.1,
-                             timeout=3.0, memory=128, cpu=0.5, max_concurrency=1)
+                             memory=128, cpu=0.5, max_concurrency=1)
         svc_b = ServiceClass(service_id="svc-b", arrival_rate=2.0, job_size=0.2,
-                             timeout=5.0, memory=256, cpu=1.0, max_concurrency=2)
+                             memory=256, cpu=1.0, max_concurrency=2)
         wm.register_service(svc_a)
         wm.register_service(svc_b)
         wm.start()

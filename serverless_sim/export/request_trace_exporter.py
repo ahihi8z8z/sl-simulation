@@ -22,7 +22,6 @@ TRACE_HEADER = [
     "assigned_instance_id",
     "cold_start",
     "dropped",
-    "timed_out",
     "drop_reason",
     "status",
 ]
@@ -54,7 +53,6 @@ class RequestTraceExporter:
                 inv.assigned_instance_id or "",
                 inv.cold_start,
                 inv.dropped,
-                inv.timed_out,
                 inv.drop_reason or "",
                 inv.status,
             ]

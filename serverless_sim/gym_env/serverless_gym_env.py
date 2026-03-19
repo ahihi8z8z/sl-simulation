@@ -106,7 +106,6 @@ class ServerlessGymEnv(gym.Env):
         reward_cfg = self.gym_config.get("reward", {})
         self._reward_calc = RewardCalculator(
             drop_penalty=reward_cfg.get("drop_penalty", -1.0),
-            timeout_penalty=reward_cfg.get("timeout_penalty", -1.0),
             cold_start_penalty=reward_cfg.get("cold_start_penalty", -0.1),
             latency_penalty=reward_cfg.get("latency_penalty", -0.5),
             resource_penalty=reward_cfg.get("resource_penalty", -0.1),

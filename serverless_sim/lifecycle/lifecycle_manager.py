@@ -23,8 +23,9 @@ class LifecycleManager:
         self.logger = ctx.logger
         self.sm = state_machine or OpenWhiskExtendedStateMachine.default()
 
-        # node_id → list of ContainerInstance
+        # node_id → list of ContainerInstance (only alive instances)
         self.instances: dict[str, list[ContainerInstance]] = {}
+        self._evicted_count: int = 0
 
     def _get_instances(self, node_id: str) -> list[ContainerInstance]:
         return self.instances.setdefault(node_id, [])
@@ -175,21 +176,32 @@ class LifecycleManager:
     # ------------------------------------------------------------------
 
     def evict_instance(self, instance: ContainerInstance) -> None:
-        """Evict an idle instance, releasing node memory."""
+        """Evict an idle instance, releasing node memory and removing it.
+
+        Like OpenWhisk, evicted containers are removed entirely from
+        the instance list — no lingering references.
+        """
         if instance.active_requests > 0:
             return  # Cannot evict active instance
 
         node = self.ctx.cluster_manager.get_node(instance.node_id)
         node.release(ResourceProfile(cpu=0.0, memory=instance.memory))
 
-        instance.state = "evicted"
-        instance.state_entered_at = self.ctx.env.now
+        # Remove from instance list (like docker rm)
+        node_instances = self._get_instances(instance.node_id)
+        try:
+            node_instances.remove(instance)
+        except ValueError:
+            pass
+
+        self._evicted_count += 1
 
         self.logger.debug(
-            "t=%.3f | EVICT | %s from %s",
+            "t=%.3f | EVICT | %s from %s (total_evicted=%d)",
             self.ctx.env.now,
             instance.instance_id,
             instance.node_id,
+            self._evicted_count,
         )
 
     def get_instances_for_node(self, node_id: str, state: str | None = None) -> list[ContainerInstance]:

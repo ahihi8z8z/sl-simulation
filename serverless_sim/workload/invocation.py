@@ -12,7 +12,6 @@ class Invocation:
     service_id: str = ""
     arrival_time: float = 0.0
     job_size: float = 0.0
-    timeout: float = 30.0
 
     dispatch_time: Optional[float] = None
     queue_enter_time: Optional[float] = None
@@ -25,6 +24,5 @@ class Invocation:
 
     cold_start: bool = False
     dropped: bool = False
-    timed_out: bool = False
-    drop_reason: Optional[str] = None  # "queue_full", "timeout", "no_capacity"
+    drop_reason: Optional[str] = None  # "no_capacity", "no_nodes"
     status: str = "created"

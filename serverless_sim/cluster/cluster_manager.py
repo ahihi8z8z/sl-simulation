@@ -46,6 +46,7 @@ class ClusterManager:
                 processing_factor=node_cfg.get(
                     "processing_factor", default_processing_factor
                 ),
+                max_queue_depth=node_cfg.get("max_queue_depth", 0),
             )
             serving_model = FixedRateModel(
                 processing_factor=compute_class.processing_factor
