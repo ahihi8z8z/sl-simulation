@@ -36,6 +36,7 @@ class ContainerInstance:
         self.state: str = "null"
         self.target_state: Optional[str] = None
         self.cold_start: bool = True  # True until first request completes
+        self.has_served: bool = False  # True after first request starts
 
         # Timing
         self.created_at: float = env.now

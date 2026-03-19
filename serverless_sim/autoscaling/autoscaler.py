@@ -91,8 +91,10 @@ class OpenWhiskPoolAutoscaler:
             instances = lm.get_instances_for_node(node.node_id)
 
             # 1. Evict idle containers past idle_timeout
+            #    Skip pool containers that have never served a request —
+            #    like OpenWhisk, prewarm stem cells persist until consumed.
             for inst in instances:
-                if inst.state in self._evictable_states and inst.is_idle:
+                if inst.state in self._evictable_states and inst.is_idle and inst.has_served:
                     timeout = self._idle_timeout.get(inst.service_id, 60.0)
                     if (now - inst.last_used_at) >= timeout:
                         lm.evict_instance(inst)

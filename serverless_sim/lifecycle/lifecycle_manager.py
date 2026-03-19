@@ -214,6 +214,7 @@ class LifecycleManager:
         instance.state = "running"
         instance.state_entered_at = self.ctx.env.now
         instance.active_requests += 1
+        instance.has_served = True
 
         # Per-request CPU allocation on node
         service = self.ctx.workload_manager.services[invocation.service_id]

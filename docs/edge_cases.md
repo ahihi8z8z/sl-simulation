@@ -177,8 +177,8 @@ Ngoài memory (allocate 1 lần khi tạo instance), mỗi transition có thể 
 
 ### Reconcile chỉ xử lý eviction (2 giai đoạn)
 
-1. **Evict idle:** Evict instances idle quá idle_timeout → giải phóng memory
-2. **LRU evict:** Nếu vẫn overcommit → evict LRU idle → đảm bảo memory dương
+1. **Evict idle:** Evict instances idle quá idle_timeout → giải phóng memory. Chỉ áp dụng cho containers đã từng phục vụ request (`has_served=True`). Pool containers chưa bao giờ serve (stem cells) **không bị idle evict** — giống OpenWhisk
+2. **LRU evict:** Nếu vẫn overcommit → evict LRU idle → đảm bảo memory dương. LRU evict áp dụng cho **tất cả** idle containers kể cả pool (vì đây là tình huống khẩn cấp)
 
 ### Pool top-up là reactive
 
