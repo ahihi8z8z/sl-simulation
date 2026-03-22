@@ -34,8 +34,6 @@ MULTI_SERVICE_CONFIG = {
             "memory": 256,
             "cpu": 0.5,
             "max_concurrency": 8,
-            "prewarm_count": 2,
-            "idle_timeout": 30.0,
         },
         {
             "service_id": "svc-worker",
@@ -44,8 +42,6 @@ MULTI_SERVICE_CONFIG = {
             "memory": 1024,
             "cpu": 2.0,
             "max_concurrency": 2,
-            "prewarm_count": 1,
-            "idle_timeout": 60.0,
         },
     ],
     "cluster": {
@@ -77,25 +73,25 @@ def _run_multi_service_sim():
 # Latency percentile tests
 # ------------------------------------------------------------------ #
 
-class TestLatencyPercentiles:
-    def test_percentiles_present(self):
+class TestLatencyMetrics:
+    def test_latency_mean_present(self):
         ctx, _ = _run_multi_service_sim()
         store = ctx.monitor_manager.store
         names = store.get_all_metric_names()
         assert "request.latency_mean" in names
-        assert "request.latency_p50" in names
-        assert "request.latency_p95" in names
-        assert "request.latency_p99" in names
 
-    def test_percentile_ordering(self):
+    def test_latency_mean_positive(self):
         ctx, _ = _run_multi_service_sim()
         store = ctx.monitor_manager.store
-        p50 = store.get_latest("request.latency_p50")
-        p95 = store.get_latest("request.latency_p95")
-        p99 = store.get_latest("request.latency_p99")
-        if p50 and p95 and p99:
-            assert p50[1] <= p95[1]
-            assert p95[1] <= p99[1]
+        mean = store.get_latest("request.latency_mean")
+        assert mean is not None
+        assert mean[1] > 0
+
+    def test_latency_mean_from_store(self):
+        ctx, _ = _run_multi_service_sim()
+        store = ctx.request_table
+        assert store.counters.completed > 0
+        assert store.latency_mean > 0
 
 
 # ------------------------------------------------------------------ #
@@ -143,10 +139,10 @@ class TestAutoscalingCollector:
         assert any("autoscaling.svc-api" in n for n in names)
         assert any("autoscaling.svc-worker" in n for n in names)
 
-    def test_prewarm_target_value(self):
+    def test_min_instances_metric(self):
         ctx, _ = _run_multi_service_sim()
         store = ctx.monitor_manager.store
-        entry = store.get_latest("autoscaling.svc-api.pool_target.prewarm")
+        entry = store.get_latest("autoscaling.svc-api.min_instances")
         assert entry is not None
         assert entry[1] >= 0
 

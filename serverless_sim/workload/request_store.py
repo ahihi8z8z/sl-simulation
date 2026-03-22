@@ -7,7 +7,6 @@ requests finalise, so the full table never needs to be held in memory.
 
 from __future__ import annotations
 
-import bisect
 import os
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
@@ -48,7 +47,6 @@ class RequestStore:
     def __init__(self):
         self._active: dict[str, Invocation] = {}
         self.counters = RequestCounters()
-        self.latencies: list[float] = []  # kept sorted via bisect.insort
         self._latency_sum: float = 0.0
         self._trace_writer: BatchCSVWriter | None = None
 
@@ -85,9 +83,7 @@ class RequestStore:
             if inv.cold_start:
                 self.counters.cold_starts += 1
             if inv.completion_time is not None and inv.arrival_time is not None:
-                lat = inv.completion_time - inv.arrival_time
-                bisect.insort(self.latencies, lat)
-                self._latency_sum += lat
+                self._latency_sum += inv.completion_time - inv.arrival_time
         elif status == "dropped":
             self.counters.dropped += 1
         elif status == "truncated":
@@ -126,6 +122,13 @@ class RequestStore:
     @property
     def active_count(self) -> int:
         return len(self._active)
+
+    @property
+    def latency_mean(self) -> float:
+        """Return mean latency, or 0.0 if no completed requests."""
+        if self.counters.completed == 0:
+            return 0.0
+        return self._latency_sum / self.counters.completed
 
     # ------------------------------------------------------------------
     # Internals

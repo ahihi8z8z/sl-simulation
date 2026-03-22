@@ -25,8 +25,6 @@ CONFIG = {
             "memory": 256,
             "cpu": 1.0,
             "max_concurrency": 4,
-            "prewarm_count": 1,
-            "idle_timeout": 30.0,
         }
     ],
     "cluster": {
@@ -55,23 +53,27 @@ def _make_ctx():
 
 
 class TestThresholdPolicy:
-    def test_high_cpu_increases_prewarm(self):
+    def test_high_cpu_increases_pool_target(self):
         ctx = _make_ctx()
+        # Set initial pool target so there's something to increase from
+        ctx.autoscaling_manager.set_pool_target("svc-a", "prewarm", 1)
         policy = ThresholdPolicy(cpu_high=0.5, cpu_low=0.2, prewarm_max=10)
         snapshot = {"cluster.cpu_utilization": 0.8}  # > 0.5
         actions = policy.decide(snapshot, ctx)
-        prewarm_actions = [a for a in actions if a["action"] == "set_prewarm_count"]
-        assert len(prewarm_actions) > 0
-        assert prewarm_actions[0]["value"] > 1
+        pool_actions = [a for a in actions if a["action"] == "set_pool_target"]
+        assert len(pool_actions) > 0
+        assert pool_actions[0]["value"] > 1
 
-    def test_low_cpu_decreases_prewarm(self):
+    def test_low_cpu_decreases_pool_target(self):
         ctx = _make_ctx()
+        # Set initial pool target so there's something to decrease from
+        ctx.autoscaling_manager.set_pool_target("svc-a", "prewarm", 1)
         policy = ThresholdPolicy(cpu_high=0.8, cpu_low=0.3, prewarm_min=0)
         snapshot = {"cluster.cpu_utilization": 0.1}  # < 0.3
         actions = policy.decide(snapshot, ctx)
-        prewarm_actions = [a for a in actions if a["action"] == "set_prewarm_count"]
-        assert len(prewarm_actions) > 0
-        assert prewarm_actions[0]["value"] == 0
+        pool_actions = [a for a in actions if a["action"] == "set_pool_target"]
+        assert len(pool_actions) > 0
+        assert pool_actions[0]["value"] == 0
 
     def test_normal_cpu_no_actions(self):
         ctx = _make_ctx()

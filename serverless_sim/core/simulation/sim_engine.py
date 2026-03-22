@@ -27,13 +27,17 @@ class SimulationEngine:
             self.ctx.controller.start()
         self.ctx.logger.info("SimulationEngine: setup complete")
 
-    def run(self, until: float | None = None) -> None:
+    def run(self, until: float | None = None, progress: bool = False) -> None:
         """Run the simulation with an optional drain period.
 
         The drain period lets in-flight requests finish after workload
         generation stops at ``duration``.  Configure via
-        ``config["simulation"]["drain_timeout"]`` (default: max service
-        timeout).
+        ``config["simulation"]["drain_timeout"]`` (default: 30s).
+
+        Parameters
+        ----------
+        progress : bool
+            If True, show a tqdm progress bar (requires ``tqdm``).
         """
         config_sim = self.ctx.config["simulation"]
         duration = config_sim["duration"]
@@ -48,9 +52,36 @@ class SimulationEngine:
             until, drain_timeout, total,
         )
         self._wall_start = time.monotonic()
-        self.ctx.env.run(until=total)
+
+        if progress:
+            self._run_with_progress(total)
+        else:
+            self.ctx.env.run(until=total)
+
         self._wall_end = time.monotonic()
         self.ctx.logger.info("SimulationEngine: simulation finished at t=%.3f", self.ctx.env.now)
+
+    def _run_with_progress(self, total: float, chunk: float = 1.0) -> None:
+        """Run simulation in chunks with a tqdm progress bar."""
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            self.ctx.logger.warning("tqdm not installed, running without progress bar")
+            self.ctx.env.run(until=total)
+            return
+
+        env = self.ctx.env
+        store = self.ctx.request_table
+        with tqdm(total=total, unit="s", desc="Sim") as pbar:
+            while env.now < total:
+                next_stop = min(env.now + chunk, total)
+                env.run(until=next_stop)
+                pbar.update(next_stop - pbar.n)
+                c = store.counters
+                pbar.set_postfix_str(
+                    f"req={c.total:,} done={c.completed:,} drop={c.dropped:,}",
+                    refresh=False,
+                )
 
     def _get_drain_timeout(self) -> float:
         """Return the drain timeout from config (default 30s)."""

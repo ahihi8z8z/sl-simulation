@@ -12,8 +12,8 @@
       "memory": 256,
       "cpu": 0.5,
       "max_concurrency": 8,
-      "prewarm_count": 2,
-      "idle_timeout": 30.0
+      "min_instances": 2,
+      "max_instances": 0
     },
     {
       "service_id": "svc-worker",
@@ -22,8 +22,8 @@
       "memory": 1024,
       "cpu": 2.0,
       "max_concurrency": 2,
-      "prewarm_count": 1,
-      "idle_timeout": 60.0
+      "min_instances": 1,
+      "max_instances": 0
     },
     {
       "service_id": "svc-cron",
@@ -32,8 +32,8 @@
       "memory": 512,
       "cpu": 1.0,
       "max_concurrency": 1,
-      "prewarm_count": 0,
-      "idle_timeout": 15.0
+      "min_instances": 0,
+      "max_instances": 0
     }
   ],
   "cluster": {

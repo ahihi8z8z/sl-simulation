@@ -65,10 +65,12 @@ class BaseController:
         svc_id = action["service_id"]
         value = action["value"]
 
-        if act == "set_prewarm_count":
-            self.ctx.autoscaling_manager.set_prewarm_count(svc_id, value)
-        elif act == "set_idle_timeout":
+        if act == "set_idle_timeout":
             self.ctx.autoscaling_manager.set_idle_timeout(svc_id, value)
         elif act == "set_pool_target":
             state = action["state"]
             self.ctx.autoscaling_manager.set_pool_target(svc_id, state, value)
+        elif act == "set_min_instances":
+            self.ctx.autoscaling_manager.set_min_instances(svc_id, value)
+        elif act == "set_max_instances":
+            self.ctx.autoscaling_manager.set_max_instances(svc_id, value)

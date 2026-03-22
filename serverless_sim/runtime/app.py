@@ -40,7 +40,7 @@ def run_simulate(args):
     # Run
     engine = SimulationEngine(ctx)
     engine.setup()
-    engine.run()
+    engine.run(progress=getattr(args, "progress", False))
     engine.shutdown()
 
     logger.info("Done. Results in %s", run_dir)

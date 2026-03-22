@@ -49,7 +49,7 @@ Có thể xảy ra khi nhiều request đồng thời pass memory check và cùn
 
 CPU được allocate per-request khi `start_execution()` và release khi `finish_execution()`. Không có pre-check trước khi allocate CPU — node cho phép negative available CPU.
 
-**Ảnh hưởng:** `cluster.cpu_utilization` có thể > 1.0. ThresholdPolicy sẽ phát hiện và tăng prewarm/giảm idle_timeout để giảm tải.
+**Ảnh hưởng:** `cluster.cpu_utilization` có thể > 1.0. ThresholdPolicy sẽ phát hiện và tăng pool_target/giảm idle_timeout để giảm tải.
 
 ### Không thể evict — tất cả instances đang active
 
@@ -177,18 +177,35 @@ Ngoài memory (allocate 1 lần khi tạo instance), mỗi transition có thể 
 
 ### Reconcile chỉ xử lý eviction (2 giai đoạn)
 
-1. **Evict idle:** Chỉ áp dụng cho containers ở state `warm`. Containers ở intermediate states (prewarm, code_loaded, ...) **không bị idle evict** — giống OpenWhisk stem cells, chúng tồn tại cho đến khi bị consume hoặc LRU evict
-2. **LRU evict:** Nếu vẫn overcommit → evict LRU idle → đảm bảo memory dương. Áp dụng cho **tất cả** idle containers kể cả pool (vì đây là tình huống khẩn cấp)
+1. **Evict idle:** Chỉ áp dụng cho containers ở state `warm`. Containers ở intermediate states (prewarm, code_loaded, ...) **không bị idle evict** — giống OpenWhisk stem cells, chúng tồn tại cho đến khi bị consume hoặc LRU evict. **Tôn trọng min_instances:** idle eviction bỏ qua warm containers nếu evict sẽ làm số warm giảm xuống dưới `min_instances`
+2. **LRU evict:** Nếu vẫn overcommit → evict LRU idle → đảm bảo memory dương. Áp dụng cho **tất cả** idle containers kể cả pool (vì đây là tình huống khẩn cấp). **CÓ THỂ vi phạm min_instances** (soft guarantee — memory pressure được ưu tiên)
 
 ### Pool top-up là reactive
 
 Pool **không** được fill trong reconcile. Thay vào đó, `notify_pool_change()` được gọi ngay khi:
 - Instance bị **evict** (từ `evict_instance()`)
 - Instance bị **promote** lên warm (từ `promote_instance()`)
+- Instance chuyển từ **warm→running** (từ `start_execution()`) — để replenish warm count khi giảm dưới `min_instances`
 - **Pool target thay đổi** (từ `set_pool_target()`)
+- **min_instances thay đổi** (từ `set_min_instances()`)
 - **Startup** (từ `initial_fill()` khi gọi `autoscaler.start()`)
 
 Điều này loại bỏ delay tối đa = reconcile_interval khi pool cạn — fill xảy ra ngay lập tức.
+
+### Budget logic (max_instances)
+
+Khi `notify_pool_change()` fill containers, budget được phân bổ theo thứ tự ưu tiên:
+1. **Fill warm đến min_instances trước** — đảm bảo đủ warm containers theo cấu hình user
+2. **Fill pool_targets với budget còn lại** — `max_instances - total` containers còn cho phép tạo
+
+Nếu `max_instances > 0` và tổng containers đã đạt giới hạn → không tạo thêm, request mới sẽ bị drop với `drop_reason = "max_instances"`.
+
+### min_instances vs max_instances
+
+| Tham số | Loại | Ai quản lý | Đảm bảo |
+|---------|------|-----------|---------|
+| `min_instances` | Service config (user) | Autoscaler enforce | **Soft** — idle eviction tôn trọng, LRU eviction dưới memory pressure CÓ THỂ vi phạm |
+| `max_instances` | Service config (user) | Load balancer/node enforce | **Hard** — không bao giờ vượt quá, request bị drop nếu đạt giới hạn |
 
 ### Promote edge case
 
@@ -279,8 +296,9 @@ Hợp lệ — simulation kết thúc ngay tại `duration`, tất cả in-fligh
 ### Không có autoscaling section
 
 Mặc định autoscaling tắt (`ctx.autoscaling_manager = None`). Khi đó:
-- Không có prewarm top-up
+- Không có pool top-up hay min_instances enforcement
 - Không có idle eviction
+- `max_instances` không được enforce (vì enforce xảy ra tại node/load balancer, cần autoscaler)
 - Containers tồn tại vĩnh viễn (chỉ bị evict khi code gọi trực tiếp)
 
 ### Không có lifecycle section

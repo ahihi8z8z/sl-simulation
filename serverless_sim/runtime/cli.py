@@ -17,6 +17,7 @@ def build_parser() -> argparse.ArgumentParser:
     sim_parser.add_argument("--run-name", default=None, help="Optional run name suffix")
     sim_parser.add_argument("--export-mode", type=int, choices=[0, 1, 2], default=None,
                             help="Override export mode from config")
+    sim_parser.add_argument("--progress", action="store_true", help="Show progress bar")
 
     # train
     train_parser = subparsers.add_parser("train", help="Train PPO agent")

@@ -40,8 +40,6 @@ BASE_CONFIG = {
             "memory": 256,
             "cpu": 1.0,
             "max_concurrency": 2,
-            "prewarm_count": 2,
-            "idle_timeout": 5.0,
         }
     ],
     "cluster": {
@@ -53,11 +51,14 @@ BASE_CONFIG = {
 
 
 class TestAutoscaler:
-    def test_prewarm_top_up(self):
-        """Autoscaler should create prewarm containers up to target."""
+    def test_pool_target_top_up(self):
+        """Autoscaler should create prewarm containers up to pool target."""
         ctx = _make_ctx(BASE_CONFIG)
         autoscaler = OpenWhiskPoolAutoscaler(ctx, reconcile_interval=2.0)
         ctx.autoscaling_manager = autoscaler
+
+        # Set pool target for first pool state
+        autoscaler.set_pool_target("svc-a", "prewarm", 2)
 
         ctx.cluster_manager.start_all()
         autoscaler.start()
@@ -110,14 +111,16 @@ class TestAutoscaler:
             **BASE_CONFIG,
             "services": [{
                 **BASE_CONFIG["services"][0],
-                "prewarm_count": 2,
-                "idle_timeout": 2.0,  # short idle timeout
                 "arrival_rate": 0.1,  # very low to let instances go idle
             }],
         }
         ctx = _make_ctx(config)
         autoscaler = OpenWhiskPoolAutoscaler(ctx, reconcile_interval=100.0)  # very long reconcile
         ctx.autoscaling_manager = autoscaler
+
+        # Set pool target and short idle timeout via controller/policy API
+        autoscaler.set_pool_target("svc-a", "prewarm", 2)
+        autoscaler.set_idle_timeout("svc-a", 2.0)
 
         ctx.cluster_manager.start_all()
         autoscaler.start()
@@ -155,18 +158,30 @@ class TestAutoscalingAPI:
         autoscaler = OpenWhiskPoolAutoscaler(ctx)
         api = AutoscalingAPI(autoscaler)
 
-        assert api.get_idle_timeout("svc-a") == 5.0
+        assert api.get_idle_timeout("svc-a") == 60.0  # default, not from service config
         api.set_idle_timeout("svc-a", 10.0)
         assert api.get_idle_timeout("svc-a") == 10.0
 
-    def test_get_set_prewarm_count(self):
+    def test_get_set_pool_target(self):
         ctx = _make_ctx(BASE_CONFIG)
         autoscaler = OpenWhiskPoolAutoscaler(ctx)
         api = AutoscalingAPI(autoscaler)
 
-        assert api.get_prewarm_count("svc-a") == 2
-        api.set_prewarm_count("svc-a", 5)
-        assert api.get_prewarm_count("svc-a") == 5
+        assert api.get_pool_target("svc-a", "prewarm") == 0
+        api.set_pool_target("svc-a", "prewarm", 5)
+        assert api.get_pool_target("svc-a", "prewarm") == 5
+
+    def test_get_set_min_max_instances(self):
+        ctx = _make_ctx(BASE_CONFIG)
+        autoscaler = OpenWhiskPoolAutoscaler(ctx)
+        api = AutoscalingAPI(autoscaler)
+
+        assert api.get_min_instances("svc-a") == 0
+        assert api.get_max_instances("svc-a") == 0
+        api.set_min_instances("svc-a", 3)
+        assert api.get_min_instances("svc-a") == 3
+        api.set_max_instances("svc-a", 10)
+        assert api.get_max_instances("svc-a") == 10
 
     def test_trigger_reconcile(self):
         ctx = _make_ctx(BASE_CONFIG)

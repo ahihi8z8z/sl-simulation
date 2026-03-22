@@ -12,11 +12,8 @@
       "memory": 512,
       "cpu": 1.0,
       "max_concurrency": 4,
-      "idle_timeout": 30.0,
-      "pool_targets": {
-        "prewarm": 2,
-        "code_loaded": 1
-      }
+      "min_instances": 1,
+      "max_instances": 0
     }
   ],
   "cluster": {

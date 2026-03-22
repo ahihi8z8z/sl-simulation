@@ -46,7 +46,7 @@ Có thể tùy chỉnh bằng `observation_metrics` trong gym config:
 | Local Action | Mô tả |
 |-------------|-------|
 | 0 | No-op (không làm gì) |
-| 1 | Tăng pool target (state đầu tiên trong chain) thêm 1 (tối đa `prewarm_max`) |
+| 1 | Tăng pool target (state đầu tiên trong chain) thêm 1 (tối đa `pool_target_max`) |
 | 2 | Giảm pool target (state đầu tiên trong chain) đi 1 (tối thiểu 0) |
 | 3 | Tăng `idle_timeout` thêm `idle_timeout_step` (tối đa `idle_timeout_max`) |
 | 4 | Giảm `idle_timeout` đi `idle_timeout_step` (tối thiểu `idle_timeout_min`) |

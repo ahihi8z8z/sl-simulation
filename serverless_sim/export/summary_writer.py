@@ -32,10 +32,6 @@ class SummaryWriter:
         truncated = c.truncated
         cold_starts = c.cold_starts
 
-        # store.latencies is already sorted
-        latencies = store.latencies
-        latency_sum = store._latency_sum
-
         config = self.ctx.config
         duration = config["simulation"]["duration"]
 
@@ -58,16 +54,9 @@ class SummaryWriter:
             f.write(f"Truncated: {truncated}\n")
             f.write(f"Cold starts: {cold_starts}\n")
 
-            if latencies:
-                avg = latency_sum / len(latencies)
-                p50 = latencies[len(latencies) // 2]
-                p95 = latencies[int(len(latencies) * 0.95)]
-                p99 = latencies[int(len(latencies) * 0.99)]
+            if completed > 0:
                 f.write(f"\n--- Latency (seconds) ---\n")
-                f.write(f"Mean: {avg:.4f}\n")
-                f.write(f"P50:  {p50:.4f}\n")
-                f.write(f"P95:  {p95:.4f}\n")
-                f.write(f"P99:  {p99:.4f}\n")
+                f.write(f"Mean: {store.latency_mean:.4f}\n")
 
             if total > 0:
                 f.write(f"\n--- Rates ---\n")

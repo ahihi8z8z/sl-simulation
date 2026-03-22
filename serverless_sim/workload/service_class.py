@@ -13,9 +13,8 @@ class ServiceClass:
     max_concurrency: int = 1
     memory: float = 256.0
     cpu: float = 1.0
-    prewarm_count: int = 0
-    idle_timeout: float = 60.0
-    pool_targets: dict = field(default_factory=dict)  # {state: count}
+    min_instances: int = 0
+    max_instances: int = 0  # 0 = unlimited
 
     @classmethod
     def from_config(cls, cfg: dict) -> "ServiceClass":
@@ -29,7 +28,6 @@ class ServiceClass:
             max_concurrency=cfg["max_concurrency"],
             memory=cfg["memory"],
             cpu=cfg["cpu"],
-            prewarm_count=cfg.get("prewarm_count", 0),
-            idle_timeout=cfg.get("idle_timeout", 60.0),
-            pool_targets=cfg.get("pool_targets", {}),
+            min_instances=cfg.get("min_instances", 0),
+            max_instances=cfg.get("max_instances", 0),
         )

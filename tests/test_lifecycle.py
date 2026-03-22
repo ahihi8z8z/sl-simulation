@@ -105,11 +105,9 @@ class TestLifecycleEndToEnd:
 
         ctx.env.run(until=10.0)
 
-        # Completed invocations are flushed from memory, but latencies are recorded
+        # Completed invocations are flushed from memory, but mean latency is tracked
         assert ctx.request_table.counters.completed > 0
-        assert len(ctx.request_table.latencies) > 0
-        for lat in ctx.request_table.latencies:
-            assert lat > 0, "Latency should be positive"
+        assert ctx.request_table.latency_mean > 0, "Mean latency should be positive"
 
     def test_cold_start_first_request(self):
         """First request to a service should be a cold start, with warm hits after."""

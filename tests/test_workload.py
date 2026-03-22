@@ -69,8 +69,8 @@ class TestServiceClass:
             "max_concurrency": 1,
         }
         svc = ServiceClass.from_config(cfg)
-        assert svc.prewarm_count == 0
-        assert svc.idle_timeout == 60.0
+        assert svc.min_instances == 0
+        assert svc.max_instances == 0
         assert svc.arrival_mode == "poisson"
 
 

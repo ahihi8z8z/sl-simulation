@@ -2,7 +2,7 @@
 
 ## Tổng quan
 
-Hệ thống hỗ trợ train PPO agent (Stable-Baselines3) để học chính sách autoscaling. Agent quan sát trạng thái cluster và điều chỉnh `prewarm_count` + `idle_timeout` của từng service.
+Hệ thống hỗ trợ train PPO agent (Stable-Baselines3) để học chính sách autoscaling. Agent quan sát trạng thái cluster và điều chỉnh `pool_target` + `idle_timeout` của từng service thông qua AutoscalingAPI. `min_instances` và `max_instances` là cấu hình user (trong service config), không do agent điều chỉnh.
 
 ## Training Pipeline
 
@@ -138,7 +138,7 @@ Mean reward: -10.45
 
 - Bắt đầu với default penalties
 - Nếu agent học được nhưng không giảm drops → tăng |drop_penalty|
-- Nếu agent không bao giờ tăng prewarm → throughput_reward quá thấp
+- Nếu agent không bao giờ tăng pool_target → throughput_reward quá thấp
 - Nếu agent giữ quá nhiều resources → tăng |resource_penalty|
 - Theo dõi reward curve trong training log
 

@@ -6,7 +6,7 @@ SimPy-based serverless system simulator with Gymnasium wrapper and Stable-Baseli
 
 `serverless-sim` models a serverless computing platform inspired by Apache OpenWhisk. It simulates the full lifecycle of function invocations — from Poisson-driven request arrival, through consistent-hash load balancing, container cold starts, concurrent execution, to autoscaling and eviction — all built on the [SimPy](https://simpy.readthedocs.io/) discrete-event simulation framework.
 
-The simulator exposes a [Gymnasium](https://gymnasium.farama.org/) environment, allowing reinforcement learning agents (e.g., PPO via Stable-Baselines3) to learn autoscaling policies by controlling prewarm counts and idle timeouts.
+The simulator exposes a [Gymnasium](https://gymnasium.farama.org/) environment, allowing reinforcement learning agents (e.g., PPO via Stable-Baselines3) to learn autoscaling policies by controlling pool targets and idle timeouts. Services are configured with `min_instances` and `max_instances` to set scaling bounds.
 
 ## Architecture
 

@@ -65,6 +65,14 @@ def _validate(config: dict, path: str) -> None:
         missing_svc = REQUIRED_SERVICE_KEYS - set(svc.keys())
         if missing_svc:
             raise ValueError(f"Config '{path}' services[{i}] missing keys: {sorted(missing_svc)}")
+        # Validate min_instances <= max_instances when max_instances > 0
+        min_inst = svc.get("min_instances", 0)
+        max_inst = svc.get("max_instances", 0)
+        if max_inst > 0 and min_inst > max_inst:
+            raise ValueError(
+                f"Config '{path}' services[{i}] min_instances ({min_inst}) "
+                f"must be <= max_instances ({max_inst})"
+            )
 
     # cluster section
     cluster = config["cluster"]

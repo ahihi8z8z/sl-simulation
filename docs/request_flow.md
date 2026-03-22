@@ -44,6 +44,10 @@ arrival_time  dispatch_time  queue_enter_time     (transition time)          exe
    - Set `invocation.status = "dropped"`
    - Set `invocation.drop_reason = "no_capacity"`
    - Set `invocation.completion_time = env.now`
+4. Nếu không có node nào enabled:
+   - Drop với `drop_reason = "no_nodes"`
+5. Nếu service đạt giới hạn `max_instances` (tổng containers trên tất cả nodes >= max_instances):
+   - Drop với `drop_reason = "max_instances"` (xử lý tại node khi không tìm được instance khả dụng)
 
 **Lưu ý:** Memory check ở đây là check thô — chỉ xem node còn bao nhiêu memory available, không reserve trước. Nhiều request có thể pass check cùng lúc và gây overcommit. Autoscaler xử lý overcommit qua LRU eviction.
 
@@ -137,6 +141,7 @@ lifecycle_manager.start_execution(instance, invocation)
 - Allocate per-request CPU: `node.allocate(ResourceProfile(cpu=service.cpu, memory=0))`
 - Set `invocation.execution_start_time = env.now`
 - Set `invocation.assigned_instance_id`
+- **Thông báo autoscaler:** gọi `notify_pool_change()` vì warm→running làm giảm warm count, có thể cần replenish để duy trì `min_instances`
 
 ### 6b. Thời gian phục vụ
 
@@ -175,11 +180,15 @@ ctx.request_table.finalize(invocation)
 `finalize()`:
 - Cập nhật counters, ghi latency (bisect.insort), stream CSV row, xóa khỏi `_active`
 
-### 7b. Dropped (no capacity / queue full)
+### 7b. Dropped
 
-Xảy ra ở Phase 2:
+Xảy ra ở Phase 2 (dispatch) hoặc Phase 4 (chọn instance):
 - Set `dropped = True`
-- Set `status = "dropped"`, `drop_reason = "no_capacity"`
+- Set `status = "dropped"`
+- `drop_reason` có thể là:
+  - `"no_capacity"` — tất cả nodes hết memory hoặc queue đầy
+  - `"max_instances"` — service đạt giới hạn `max_instances`, không thể tạo thêm container
+  - `"no_nodes"` — không có node nào enabled
 - Gọi `finalize(inv)`
 
 ### 7c. Truncated (simulation kết thúc)
@@ -240,7 +249,7 @@ t=5.300  EXEC_END  req-10 completed (latency=0.300s, cold_start=True)
               +----------+----------+
               |                     |
          +----v-----+         +----v-----+
-         |  queued  |         | dropped  |  (no_capacity / queue_full)
+         |  queued  |         | dropped  |  (no_capacity / max_instances / no_nodes)
          +----+-----+         +----------+
               |
          +----v------+

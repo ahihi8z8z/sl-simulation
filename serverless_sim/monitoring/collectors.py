@@ -30,14 +30,8 @@ class RequestCollector(BaseCollector):
             "request.in_flight": store.active_count,
         }
 
-        # store.latencies is kept sorted via bisect.insort — no sort needed
-        latencies = store.latencies
-        if latencies:
-            n = len(latencies)
-            metrics["request.latency_mean"] = store._latency_sum / n
-            metrics["request.latency_p50"] = latencies[n // 2]
-            metrics["request.latency_p95"] = latencies[int(n * 0.95)]
-            metrics["request.latency_p99"] = latencies[int(n * 0.99)]
+        if c.completed > 0:
+            metrics["request.latency_mean"] = store.latency_mean
 
         return metrics
 
@@ -120,6 +114,11 @@ class AutoscalingCollector(BaseCollector):
         metrics = {}
         for svc_id in ctx.workload_manager.services:
             metrics[f"autoscaling.{svc_id}.idle_timeout"] = ctx.autoscaling_manager.get_idle_timeout(svc_id)
+            metrics[f"autoscaling.{svc_id}.min_instances"] = ctx.autoscaling_manager.get_min_instances(svc_id)
+            metrics[f"autoscaling.{svc_id}.max_instances"] = ctx.autoscaling_manager.get_max_instances(svc_id)
+            metrics[f"autoscaling.{svc_id}.current_instances"] = ctx.autoscaling_manager._count_total_instances(svc_id)
+            metrics[f"autoscaling.{svc_id}.alive_instances"] = ctx.autoscaling_manager._count_alive_instances(svc_id)
+            metrics[f"autoscaling.{svc_id}.warm_instances"] = ctx.autoscaling_manager._count_warm_instances(svc_id)
             # Per-state pool targets
             targets = ctx.autoscaling_manager.get_all_pool_targets(svc_id)
             for state, count in targets.items():

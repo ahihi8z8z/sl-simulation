@@ -114,6 +114,24 @@ class Node:
                 promote_proc = lm.promote_instance(self, promotable)
                 instance = yield promote_proc
             else:
+                # Check max_instances before cold start
+                if self._ctx.autoscaling_manager:
+                    max_inst = self._ctx.autoscaling_manager.get_max_instances(invocation.service_id)
+                    if max_inst > 0:
+                        total = self._ctx.autoscaling_manager._count_total_instances(invocation.service_id)
+                        if total >= max_inst:
+                            invocation.dropped = True
+                            invocation.drop_reason = "max_instances"
+                            invocation.status = "dropped"
+                            invocation.completion_time = self.env.now
+                            self._ctx.request_table.finalize(invocation)
+                            self.logger.debug(
+                                "t=%.3f | %s | DROP %s (max_instances=%d)",
+                                self.env.now, self.node_id,
+                                invocation.request_id, max_inst,
+                            )
+                            return
+
                 # Full cold start: create new instance from null
                 cold_start_proc = lm.prepare_instance_for_service(self, invocation.service_id)
                 instance = yield cold_start_proc
