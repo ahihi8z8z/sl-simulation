@@ -10,7 +10,6 @@ from serverless_sim.cluster.cluster_manager import ClusterManager
 from serverless_sim.workload.workload_manager import WorkloadManager
 from serverless_sim.scheduling.load_balancer import ShardingContainerPoolBalancer
 from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
-from serverless_sim.lifecycle.state_machine import OpenWhiskExtendedStateMachine
 from serverless_sim.monitoring.monitor_manager import MonitorManager
 from serverless_sim.export.export_manager import ExportManager
 from serverless_sim.autoscaling.autoscaler import OpenWhiskPoolAutoscaler
@@ -44,12 +43,11 @@ class SimulationBuilder:
         # Cluster
         ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
 
-        # Workload
+        # Workload (each service builds its own state machine from config)
         ctx.workload_manager = WorkloadManager.from_config(ctx)
 
-        # Lifecycle
-        sm = OpenWhiskExtendedStateMachine.from_config(config)
-        ctx.lifecycle_manager = LifecycleManager(ctx, state_machine=sm)
+        # Lifecycle (per-service state machines are in ServiceClass)
+        ctx.lifecycle_manager = LifecycleManager(ctx)
 
         # Load balancer
         ctx.dispatcher = ShardingContainerPoolBalancer(ctx)

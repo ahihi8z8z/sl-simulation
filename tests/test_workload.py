@@ -11,6 +11,25 @@ from serverless_sim.workload.generators import PoissonFixedSizeGenerator
 from serverless_sim.workload.workload_manager import WorkloadManager
 
 
+LIFECYCLE_256_1 = {
+    "cold_start_chain": ["null", "prewarm", "warm"],
+    "states": [
+        {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
+        {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 128},
+        {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 256, "service_bound": True, "reusable": True},
+        {"name": "running", "category": "transient", "cpu": 1.0, "memory": 256, "service_bound": True, "reusable": False},
+        {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": False},
+    ],
+    "transitions": [
+        {"from": "null", "to": "prewarm", "time": 0.5},
+        {"from": "prewarm", "to": "warm", "time": 0.3},
+        {"from": "warm", "to": "running", "time": 0.0},
+        {"from": "running", "to": "warm", "time": 0.0},
+        {"from": "warm", "to": "evicted", "time": 0.0},
+        {"from": "prewarm", "to": "evicted", "time": 0.0},
+    ],
+}
+
 SAMPLE_CONFIG = {
     "simulation": {"duration": 10.0, "seed": 42, "export_mode": 0},
     "services": [
@@ -18,9 +37,8 @@ SAMPLE_CONFIG = {
             "service_id": "svc-a",
             "arrival_rate": 10.0,
             "job_size": 0.5,
-            "memory": 256,
-            "cpu": 1.0,
             "max_concurrency": 2,
+            "lifecycle": LIFECYCLE_256_1,
         }
     ],
     "cluster": {
@@ -55,8 +73,8 @@ class TestServiceClass:
         assert svc.service_id == "svc-a"
         assert svc.arrival_rate == 10.0
         assert svc.job_size == 0.5
-        assert svc.memory == 256
-        assert svc.cpu == 1.0
+        assert svc.peak_memory == 256
+        assert svc.peak_cpu == 1.0
         assert svc.max_concurrency == 2
 
     def test_defaults(self):
@@ -64,9 +82,25 @@ class TestServiceClass:
             "service_id": "svc-b",
             "arrival_rate": 1.0,
             "job_size": 0.1,
-            "memory": 128,
-            "cpu": 0.5,
             "max_concurrency": 1,
+            "lifecycle": {
+                "cold_start_chain": ["null", "prewarm", "warm"],
+                "states": [
+                    {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
+                    {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 64},
+                    {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 128, "service_bound": True, "reusable": True},
+                    {"name": "running", "category": "transient", "cpu": 0.5, "memory": 128, "service_bound": True, "reusable": False},
+                    {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": False},
+                ],
+                "transitions": [
+                    {"from": "null", "to": "prewarm", "time": 0.5},
+                    {"from": "prewarm", "to": "warm", "time": 0.3},
+                    {"from": "warm", "to": "running", "time": 0.0},
+                    {"from": "running", "to": "warm", "time": 0.0},
+                    {"from": "warm", "to": "evicted", "time": 0.0},
+                    {"from": "prewarm", "to": "evicted", "time": 0.0},
+                ],
+            },
         }
         svc = ServiceClass.from_config(cfg)
         assert svc.min_instances == 0
@@ -163,9 +197,9 @@ class TestWorkloadManager:
         ctx = _make_ctx()
         wm = WorkloadManager(ctx)
         svc_a = ServiceClass(service_id="svc-a", arrival_rate=5.0, job_size=0.1,
-                             memory=128, cpu=0.5, max_concurrency=1)
+                             max_concurrency=1)
         svc_b = ServiceClass(service_id="svc-b", arrival_rate=2.0, job_size=0.2,
-                             memory=256, cpu=1.0, max_concurrency=2)
+                             max_concurrency=2)
         wm.register_service(svc_a)
         wm.register_service(svc_b)
         wm.start()

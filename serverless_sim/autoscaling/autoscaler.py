@@ -27,14 +27,6 @@ class OpenWhiskPoolAutoscaler:
         self.logger = ctx.logger
         self.reconcile_interval = reconcile_interval
 
-        # Evictable states from state machine (stable, not null/evicted)
-        self._evictable_states = ctx.lifecycle_manager.sm.get_evictable_states()
-
-        # Pool states: intermediate states between null and warm (exclusive)
-        # Warm containers are created on-demand by requests, not by pool top-up.
-        chain = ctx.lifecycle_manager.sm.get_cold_start_path()
-        self._pool_states = [s for s in chain if s not in ("null", "warm")]  # e.g. ["prewarm", "code_loaded"]
-
         # Per-service min/max instances (from service config)
         self._min_instances: dict[str, int] = {}
         self._max_instances: dict[str, int] = {}
@@ -55,6 +47,17 @@ class OpenWhiskPoolAutoscaler:
             self._max_instances[svc.service_id] = svc.max_instances
             self._idle_timeout[svc.service_id] = 60.0
             self._pool_targets[svc.service_id] = {}
+
+    def _get_pool_states(self, service_id: str) -> list[str]:
+        """Get intermediate states (between null and warm) for a service."""
+        sm = self.ctx.workload_manager.services[service_id].state_machine
+        chain = sm.get_cold_start_path()
+        return [s for s in chain if s not in ("null", "warm")]
+
+    def _get_evictable_states(self, service_id: str) -> set[str]:
+        """Get evictable states for a service."""
+        sm = self.ctx.workload_manager.services[service_id].state_machine
+        return sm.get_evictable_states()
 
     def start(self) -> None:
         self.initial_fill()
@@ -100,7 +103,7 @@ class OpenWhiskPoolAutoscaler:
             while node.available.memory < 0:
                 candidates = [
                     i for i in instances
-                    if i.state in self._evictable_states and i.is_idle
+                    if i.state in self._get_evictable_states(i.service_id) and i.is_idle
                 ]
                 if not candidates:
                     break
@@ -122,7 +125,7 @@ class OpenWhiskPoolAutoscaler:
         lm = self.ctx.lifecycle_manager
         node = self.ctx.cluster_manager.get_node(node_id)
         service = self.ctx.workload_manager.services[service_id]
-        mem_req = ResourceProfile(cpu=0.0, memory=service.memory)
+        mem_req = ResourceProfile(cpu=0.0, memory=service.peak_memory)
 
         max_inst = self._max_instances.get(service_id, 0)
         min_inst = self._min_instances.get(service_id, 0)
@@ -163,7 +166,8 @@ class OpenWhiskPoolAutoscaler:
                 created += 1
 
         # 2. Fill pool_targets with remaining budget
-        for state in self._pool_states:
+        pool_states = self._get_pool_states(service_id)
+        for state in pool_states:
             target = self._pool_targets.get(service_id, {}).get(state, 0)
             if target <= 0:
                 continue
@@ -255,10 +259,11 @@ class OpenWhiskPoolAutoscaler:
 
         Triggers reactive top-up on all nodes immediately.
         """
-        if state not in self._pool_states:
+        pool_states = self._get_pool_states(service_id)
+        if state not in pool_states:
             self.logger.warning(
                 "Ignoring pool target for '%s' -- only intermediate states %s are valid",
-                state, self._pool_states,
+                state, pool_states,
             )
             return
         self._pool_targets.setdefault(service_id, {})[state] = count

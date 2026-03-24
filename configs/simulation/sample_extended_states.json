@@ -9,11 +9,30 @@
       "service_id": "svc-extended",
       "arrival_rate": 3.0,
       "job_size": 0.2,
-      "memory": 512,
-      "cpu": 1.0,
       "max_concurrency": 4,
       "min_instances": 1,
-      "max_instances": 0
+      "max_instances": 0,
+      "lifecycle": {
+        "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
+        "states": [
+          {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
+          {"name": "prewarm", "category": "stable", "cpu": 0.1, "memory": 128},
+          {"name": "code_loaded", "category": "stable", "cpu": 0.2, "memory": 384, "service_bound": true},
+          {"name": "warm", "category": "stable", "cpu": 0.3, "memory": 512, "service_bound": true, "reusable": true},
+          {"name": "running", "category": "transient", "cpu": 1.0, "memory": 512, "service_bound": true, "reusable": false},
+          {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": false}
+        ],
+        "transitions": [
+          {"from": "null", "to": "prewarm", "time": 0.3, "cpu": 0.1},
+          {"from": "prewarm", "to": "code_loaded", "time": 0.4, "cpu": 0.2, "memory": 64},
+          {"from": "code_loaded", "to": "warm", "time": 0.2, "cpu": 0.1},
+          {"from": "warm", "to": "running", "time": 0.0},
+          {"from": "running", "to": "warm", "time": 0.0},
+          {"from": "warm", "to": "evicted", "time": 0.0},
+          {"from": "prewarm", "to": "evicted", "time": 0.0},
+          {"from": "code_loaded", "to": "evicted", "time": 0.0}
+        ]
+      }
     }
   ],
   "cluster": {
@@ -24,27 +43,6 @@
         "memory_capacity": 16384,
         "max_queue_depth": 100
       }
-    ]
-  },
-  "lifecycle": {
-    "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
-    "states": [
-      {"name": "null", "category": "stable"},
-      {"name": "prewarm", "category": "stable", "steady_memory": 0.0},
-      {"name": "code_loaded", "category": "stable", "service_bound": true},
-      {"name": "warm", "category": "stable", "service_bound": true, "reusable": true},
-      {"name": "running", "category": "transient", "service_bound": true, "reusable": false},
-      {"name": "evicted", "category": "stable", "reusable": false}
-    ],
-    "transitions": [
-      {"from": "null", "to": "prewarm", "time": 0.3, "cpu": 0.1},
-      {"from": "prewarm", "to": "code_loaded", "time": 0.4, "cpu": 0.2, "memory": 64},
-      {"from": "code_loaded", "to": "warm", "time": 0.2, "cpu": 0.1},
-      {"from": "warm", "to": "running", "time": 0.0},
-      {"from": "running", "to": "warm", "time": 0.0},
-      {"from": "warm", "to": "evicted", "time": 0.0},
-      {"from": "prewarm", "to": "evicted", "time": 0.0},
-      {"from": "code_loaded", "to": "evicted", "time": 0.0}
     ]
   },
   "monitoring": {

@@ -42,15 +42,12 @@ class ActionMapper:
         self.idle_timeout_min = idle_timeout_min
         self.idle_timeout_max = idle_timeout_max
         self.idle_timeout_step = idle_timeout_step
-        # First pool state determined at apply time from autoscaler
-        self._first_pool_state: str | None = None
+        pass  # pool states resolved per-service at apply time
 
-    def _get_first_pool_state(self, api: AutoscalingAPI) -> str:
-        """Get the first pool state from the autoscaler."""
-        if self._first_pool_state is None:
-            pool_states = api._autoscaler._pool_states
-            self._first_pool_state = pool_states[0] if pool_states else "prewarm"
-        return self._first_pool_state
+    def _get_first_pool_state(self, svc_id: str, api: AutoscalingAPI) -> str:
+        """Get the first pool state for a service from the autoscaler."""
+        pool_states = api._autoscaler._get_pool_states(svc_id)
+        return pool_states[0] if pool_states else "prewarm"
 
     def apply(self, action: int, api: AutoscalingAPI) -> None:
         """Apply a discrete action through the autoscaling API."""
@@ -65,11 +62,11 @@ class ActionMapper:
         if local_action == 0:
             pass  # no-op
         elif local_action == 1:
-            state = self._get_first_pool_state(api)
+            state = self._get_first_pool_state(svc_id, api)
             cur = api.get_pool_target(svc_id, state)
             api.set_pool_target(svc_id, state, min(cur + 1, self.pool_target_max))
         elif local_action == 2:
-            state = self._get_first_pool_state(api)
+            state = self._get_first_pool_state(svc_id, api)
             cur = api.get_pool_target(svc_id, state)
             api.set_pool_target(svc_id, state, max(cur - 1, self.pool_target_min))
         elif local_action == 3:

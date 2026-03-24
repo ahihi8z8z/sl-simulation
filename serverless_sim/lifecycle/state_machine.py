@@ -114,11 +114,11 @@ class OpenWhiskExtendedStateMachine:
         """
         sm = cls()
 
-        sm.add_state(StateDefinition("null", "stable"))
-        sm.add_state(StateDefinition("prewarm", "stable", steady_memory=0.0))
-        sm.add_state(StateDefinition("warm", "stable", service_bound=True, reusable=True))
-        sm.add_state(StateDefinition("running", "transient", service_bound=True, reusable=False))
-        sm.add_state(StateDefinition("evicted", "stable", reusable=False))
+        sm.add_state(StateDefinition("null", "stable", cpu=0.0, memory=0.0))
+        sm.add_state(StateDefinition("prewarm", "stable", cpu=0.0, memory=128.0))
+        sm.add_state(StateDefinition("warm", "stable", cpu=0.1, memory=256.0, service_bound=True, reusable=True))
+        sm.add_state(StateDefinition("running", "transient", cpu=1.0, memory=256.0, service_bound=True, reusable=False))
+        sm.add_state(StateDefinition("evicted", "stable", cpu=0.0, memory=0.0, reusable=False))
 
         # Cold-start chain transitions
         sm.add_transition(TransitionDefinition("null", "prewarm", transition_time=0.5))
@@ -136,34 +136,29 @@ class OpenWhiskExtendedStateMachine:
         return sm
 
     @classmethod
-    def from_config(cls, config: dict) -> OpenWhiskExtendedStateMachine:
-        """Build a state machine from config, falling back to default if absent.
+    def from_lifecycle_config(cls, lifecycle_cfg: dict) -> OpenWhiskExtendedStateMachine:
+        """Build a state machine from a lifecycle config dict.
 
         Config format::
 
             {
-              "lifecycle": {
-                "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
-                "states": [...],
-                "transitions": [...]
-              }
+              "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
+              "states": [
+                {"name": "null", "cpu": 0, "memory": 0},
+                {"name": "prewarm", "cpu": 0.1, "memory": 128},
+                ...
+              ],
+              "transitions": [...]
             }
-
-        If ``cold_start_chain`` is not provided, it is inferred as
-        ``["null", ..., "warm"]`` by following forward transitions.
         """
-        lifecycle_cfg = config.get("lifecycle")
-        if not lifecycle_cfg:
-            return cls.default()
-
         sm = cls()
 
         for s_cfg in lifecycle_cfg.get("states", []):
             sd = StateDefinition(
                 state_name=s_cfg["name"],
                 category=s_cfg.get("category", "stable"),
-                steady_cpu=s_cfg.get("steady_cpu", 0.0),
-                steady_memory=s_cfg.get("steady_memory", 0.0),
+                cpu=s_cfg.get("cpu", 0.0),
+                memory=s_cfg.get("memory", 0.0),
                 service_bound=s_cfg.get("service_bound", False),
                 reusable=s_cfg.get("reusable", True),
             )
@@ -195,6 +190,17 @@ class OpenWhiskExtendedStateMachine:
             sm.set_cold_start_chain(chain)
 
         return sm
+
+    @classmethod
+    def from_config(cls, config: dict) -> OpenWhiskExtendedStateMachine:
+        """Build from top-level config (reads config["lifecycle"]).
+
+        Falls back to default() if no lifecycle section.
+        """
+        lifecycle_cfg = config.get("lifecycle")
+        if not lifecycle_cfg:
+            return cls.default()
+        return cls.from_lifecycle_config(lifecycle_cfg)
 
     def _infer_chain(self) -> list[str]:
         """Infer linear chain from null to warm by following transitions.

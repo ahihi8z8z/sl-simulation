@@ -10,6 +10,25 @@ from serverless_sim.cluster.serving_model import FixedRateModel
 from serverless_sim.cluster.cluster_manager import ClusterManager
 
 
+LIFECYCLE_256_1 = {
+    "cold_start_chain": ["null", "prewarm", "warm"],
+    "states": [
+        {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
+        {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 128},
+        {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 256, "service_bound": True, "reusable": True},
+        {"name": "running", "category": "transient", "cpu": 1.0, "memory": 256, "service_bound": True, "reusable": False},
+        {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": False},
+    ],
+    "transitions": [
+        {"from": "null", "to": "prewarm", "time": 0.5},
+        {"from": "prewarm", "to": "warm", "time": 0.3},
+        {"from": "warm", "to": "running", "time": 0.0},
+        {"from": "running", "to": "warm", "time": 0.0},
+        {"from": "warm", "to": "evicted", "time": 0.0},
+        {"from": "prewarm", "to": "evicted", "time": 0.0},
+    ],
+}
+
 SAMPLE_CONFIG = {
     "simulation": {"duration": 10.0, "seed": 42},
     "services": [
@@ -17,9 +36,8 @@ SAMPLE_CONFIG = {
             "service_id": "svc-a",
             "arrival_rate": 1.0,
             "job_size": 0.5,
-            "memory": 256,
-            "cpu": 1.0,
             "max_concurrency": 2,
+            "lifecycle": LIFECYCLE_256_1,
         }
     ],
     "cluster": {

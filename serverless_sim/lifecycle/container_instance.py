@@ -18,16 +18,12 @@ class ContainerInstance:
         service_id: str,
         node_id: str,
         max_concurrency: int = 1,
-        memory: float = 256.0,
-        cpu: float = 1.0,
     ):
         self.env = env
         self.instance_id: str = f"inst-{next(_id_counter)}"
         self.service_id: str = service_id
         self.node_id: str = node_id
         self.max_concurrency: int = max_concurrency
-        self.memory: float = memory
-        self.cpu: float = cpu
 
         # SimPy resource for concurrency control
         self.slots: simpy.Resource = simpy.Resource(env, capacity=max_concurrency)
@@ -42,9 +38,8 @@ class ContainerInstance:
         self.last_used_at: float = env.now
         self.state_entered_at: float = env.now
 
-        # Per-request CPU tracking
+        # Request tracking
         self.active_requests: int = 0
-        self.allocated_request_cpu: float = 0.0
 
     @property
     def is_idle(self) -> bool:

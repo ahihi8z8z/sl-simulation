@@ -49,11 +49,10 @@ class ThresholdPolicy(BaseControlPolicy):
         if ctx.autoscaling_manager is None:
             return actions
 
-        # Determine the first pool state for pool_target adjustments
-        pool_states = ctx.autoscaling_manager._pool_states
-        first_state = pool_states[0] if pool_states else "prewarm"
-
         for svc_id in ctx.workload_manager.services:
+            # Determine the first pool state for this service
+            pool_states = ctx.autoscaling_manager._get_pool_states(svc_id)
+            first_state = pool_states[0] if pool_states else "prewarm"
             current_pool_target = ctx.autoscaling_manager.get_pool_target(svc_id, first_state)
             current_idle = ctx.autoscaling_manager.get_idle_timeout(svc_id)
 

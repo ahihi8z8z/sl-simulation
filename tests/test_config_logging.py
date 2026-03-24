@@ -18,9 +18,25 @@ VALID_CONFIG = {
             "service_id": "svc-a",
             "arrival_rate": 1.0,
             "job_size": 0.1,
-            "memory": 256,
-            "cpu": 1.0,
             "max_concurrency": 2,
+            "lifecycle": {
+                "cold_start_chain": ["null", "prewarm", "warm"],
+                "states": [
+                    {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
+                    {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 128},
+                    {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 256, "service_bound": True, "reusable": True},
+                    {"name": "running", "category": "transient", "cpu": 1.0, "memory": 256, "service_bound": True, "reusable": False},
+                    {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": False},
+                ],
+                "transitions": [
+                    {"from": "null", "to": "prewarm", "time": 0.5},
+                    {"from": "prewarm", "to": "warm", "time": 0.3},
+                    {"from": "warm", "to": "running", "time": 0.0},
+                    {"from": "running", "to": "warm", "time": 0.0},
+                    {"from": "warm", "to": "evicted", "time": 0.0},
+                    {"from": "prewarm", "to": "evicted", "time": 0.0},
+                ],
+            },
         }
     ],
     "cluster": {
@@ -83,7 +99,7 @@ class TestLoadConfig:
             load_config(path)
 
     def test_missing_service_key(self):
-        svc = {k: v for k, v in VALID_CONFIG["services"][0].items() if k != "cpu"}
+        svc = {k: v for k, v in VALID_CONFIG["services"][0].items() if k != "lifecycle"}
         cfg = {**VALID_CONFIG, "services": [svc]}
         tmpdir = tempfile.mkdtemp(prefix="test_cfg_")
         path = _write_config(cfg, tmpdir)

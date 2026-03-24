@@ -42,9 +42,9 @@ class ShardingContainerPoolBalancer:
         n = len(self._nodes)
         primary_idx = self._hash_to_index(invocation.service_id, n)
 
-        # Find the memory requirement for this service
+        # Find the peak memory requirement for this service
         service = self.ctx.workload_manager.services.get(invocation.service_id)
-        mem_required = service.memory if service else 0.0
+        mem_required = service.peak_memory if service else 0.0
         resource_req = ResourceProfile(cpu=0.0, memory=mem_required)
 
         # Try primary, then walk the ring

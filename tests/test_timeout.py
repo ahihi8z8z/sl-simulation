@@ -11,16 +11,34 @@ from serverless_sim.core.simulation.sim_builder import SimulationBuilder
 from serverless_sim.core.simulation.sim_engine import SimulationEngine
 
 
+LIFECYCLE_256_1 = {
+    "cold_start_chain": ["null", "prewarm", "warm"],
+    "states": [
+        {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
+        {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 128},
+        {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 256, "service_bound": True, "reusable": True},
+        {"name": "running", "category": "transient", "cpu": 1.0, "memory": 256, "service_bound": True, "reusable": False},
+        {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": False},
+    ],
+    "transitions": [
+        {"from": "null", "to": "prewarm", "time": 0.5},
+        {"from": "prewarm", "to": "warm", "time": 0.3},
+        {"from": "warm", "to": "running", "time": 0.0},
+        {"from": "running", "to": "warm", "time": 0.0},
+        {"from": "warm", "to": "evicted", "time": 0.0},
+        {"from": "prewarm", "to": "evicted", "time": 0.0},
+    ],
+}
+
 QUEUE_LIMIT_CONFIG = {
     "simulation": {"duration": 10.0, "seed": 42, "export_mode": 0},
     "services": [
         {
             "service_id": "svc-flood",
-            "arrival_rate": 50.0,
+            "arrival_rate": 100.0,
             "job_size": 1.0,
-            "memory": 256,
-            "cpu": 1.0,
             "max_concurrency": 1,
+            "lifecycle": LIFECYCLE_256_1,
         }
     ],
     "cluster": {
@@ -28,7 +46,7 @@ QUEUE_LIMIT_CONFIG = {
             {
                 "node_id": "node-0",
                 "cpu_capacity": 8.0,
-                "memory_capacity": 8192,
+                "memory_capacity": 2048,
                 "max_queue_depth": 5,
             },
         ]

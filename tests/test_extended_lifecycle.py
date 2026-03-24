@@ -19,6 +19,28 @@ from serverless_sim.core.simulation.sim_builder import SimulationBuilder
 from serverless_sim.core.simulation.sim_engine import SimulationEngine
 
 
+EXTENDED_LIFECYCLE = {
+    "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
+    "states": [
+        {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
+        {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 0},
+        {"name": "code_loaded", "category": "stable", "cpu": 0, "memory": 256, "service_bound": True},
+        {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 512, "service_bound": True, "reusable": True},
+        {"name": "running", "category": "transient", "cpu": 1.0, "memory": 512, "service_bound": True, "reusable": False},
+        {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": False},
+    ],
+    "transitions": [
+        {"from": "null", "to": "prewarm", "time": 0.3, "cpu": 0.1},
+        {"from": "prewarm", "to": "code_loaded", "time": 0.4, "cpu": 0.2, "memory": 64},
+        {"from": "code_loaded", "to": "warm", "time": 0.2, "cpu": 0.1},
+        {"from": "warm", "to": "running", "time": 0.0},
+        {"from": "running", "to": "warm", "time": 0.0},
+        {"from": "warm", "to": "evicted", "time": 0.0},
+        {"from": "prewarm", "to": "evicted", "time": 0.0},
+        {"from": "code_loaded", "to": "evicted", "time": 0.0},
+    ],
+}
+
 EXTENDED_CONFIG = {
     "simulation": {"duration": 10.0, "seed": 42, "export_mode": 2},
     "services": [
@@ -26,33 +48,12 @@ EXTENDED_CONFIG = {
             "service_id": "svc-ext",
             "arrival_rate": 3.0,
             "job_size": 0.1,
-            "memory": 512,
-            "cpu": 1.0,
             "max_concurrency": 4,
+            "lifecycle": EXTENDED_LIFECYCLE,
         }
     ],
     "cluster": {
         "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 16384}]
-    },
-    "lifecycle": {
-        "states": [
-            {"name": "null", "category": "stable"},
-            {"name": "prewarm", "category": "stable", "steady_memory": 0.0},
-            {"name": "code_loaded", "category": "stable", "service_bound": True},
-            {"name": "warm", "category": "stable", "service_bound": True, "reusable": True},
-            {"name": "running", "category": "transient", "service_bound": True, "reusable": False},
-            {"name": "evicted", "category": "stable", "reusable": False},
-        ],
-        "transitions": [
-            {"from": "null", "to": "prewarm", "time": 0.3, "cpu": 0.1},
-            {"from": "prewarm", "to": "code_loaded", "time": 0.4, "cpu": 0.2, "memory": 64},
-            {"from": "code_loaded", "to": "warm", "time": 0.2, "cpu": 0.1},
-            {"from": "warm", "to": "running", "time": 0.0},
-            {"from": "running", "to": "warm", "time": 0.0},
-            {"from": "warm", "to": "evicted", "time": 0.0},
-            {"from": "prewarm", "to": "evicted", "time": 0.0},
-            {"from": "code_loaded", "to": "evicted", "time": 0.0},
-        ],
     },
     "monitoring": {"interval": 1.0, "max_history_length": 100},
 }
@@ -64,7 +65,7 @@ EXTENDED_CONFIG = {
 
 class TestExtendedStateMachine:
     def test_from_config_creates_all_states(self):
-        sm = OpenWhiskExtendedStateMachine.from_config(EXTENDED_CONFIG)
+        sm = OpenWhiskExtendedStateMachine.from_lifecycle_config(EXTENDED_LIFECYCLE)
         assert "null" in sm.states
         assert "prewarm" in sm.states
         assert "code_loaded" in sm.states
@@ -73,25 +74,25 @@ class TestExtendedStateMachine:
         assert "evicted" in sm.states
 
     def test_from_config_creates_transitions(self):
-        sm = OpenWhiskExtendedStateMachine.from_config(EXTENDED_CONFIG)
+        sm = OpenWhiskExtendedStateMachine.from_lifecycle_config(EXTENDED_LIFECYCLE)
         assert sm.get_transition("null", "prewarm") is not None
         assert sm.get_transition("prewarm", "code_loaded") is not None
         assert sm.get_transition("code_loaded", "warm") is not None
 
     def test_path_through_extended_states(self):
-        sm = OpenWhiskExtendedStateMachine.from_config(EXTENDED_CONFIG)
+        sm = OpenWhiskExtendedStateMachine.from_lifecycle_config(EXTENDED_LIFECYCLE)
         path = sm.find_path("null", "warm")
         assert path == ["null", "prewarm", "code_loaded", "warm"]
 
     def test_transition_resources(self):
-        sm = OpenWhiskExtendedStateMachine.from_config(EXTENDED_CONFIG)
+        sm = OpenWhiskExtendedStateMachine.from_lifecycle_config(EXTENDED_LIFECYCLE)
         t = sm.get_transition("prewarm", "code_loaded")
         assert t.transition_time == 0.4
         assert t.transition_cpu == 0.2
         assert t.transition_memory == 64
 
     def test_state_properties(self):
-        sm = OpenWhiskExtendedStateMachine.from_config(EXTENDED_CONFIG)
+        sm = OpenWhiskExtendedStateMachine.from_lifecycle_config(EXTENDED_LIFECYCLE)
         code_loaded = sm.get_state("code_loaded")
         assert code_loaded.service_bound is True
         assert code_loaded.category == "stable"
@@ -100,19 +101,17 @@ class TestExtendedStateMachine:
         assert running.reusable is False
 
     def test_missing_required_state_raises(self):
-        bad_config = {
-            "lifecycle": {
-                "states": [
-                    {"name": "null", "category": "stable"},
-                    {"name": "warm", "category": "stable"},
-                    # missing running and evicted
-                ],
-                "transitions": [],
-            }
+        bad_lifecycle = {
+            "states": [
+                {"name": "null", "category": "stable"},
+                {"name": "warm", "category": "stable"},
+                # missing running and evicted
+            ],
+            "transitions": [],
         }
         import pytest
         with pytest.raises(ValueError, match="missing required states"):
-            OpenWhiskExtendedStateMachine.from_config(bad_config)
+            OpenWhiskExtendedStateMachine.from_lifecycle_config(bad_lifecycle)
 
     def test_fallback_to_default(self):
         sm = OpenWhiskExtendedStateMachine.from_config({})
@@ -232,10 +231,9 @@ class TestPromoteInstance:
         from serverless_sim.autoscaling.autoscaler import OpenWhiskPoolAutoscaler
 
         ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir="/tmp/test_promote")
-        sm = OpenWhiskExtendedStateMachine.from_config(config)
         ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
         ctx.workload_manager = WorkloadManager.from_config(ctx)
-        ctx.lifecycle_manager = LifecycleManager(ctx, state_machine=sm)
+        ctx.lifecycle_manager = LifecycleManager(ctx)
         ctx.dispatcher = ShardingContainerPoolBalancer(ctx)
         ctx.cluster_manager.set_context(ctx)
         ctx.monitor_manager = MonitorManager(ctx)

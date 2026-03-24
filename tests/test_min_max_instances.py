@@ -16,6 +16,27 @@ from serverless_sim.autoscaling.autoscaler import OpenWhiskPoolAutoscaler
 from serverless_sim.monitoring.monitor_manager import MonitorManager
 
 
+def _make_lifecycle(memory=256, cpu=1.0):
+    return {
+        "cold_start_chain": ["null", "prewarm", "warm"],
+        "states": [
+            {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
+            {"name": "prewarm", "category": "stable", "cpu": 0, "memory": memory // 2},
+            {"name": "warm", "category": "stable", "cpu": 0.1, "memory": memory, "service_bound": True, "reusable": True},
+            {"name": "running", "category": "transient", "cpu": cpu, "memory": memory, "service_bound": True, "reusable": False},
+            {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": False},
+        ],
+        "transitions": [
+            {"from": "null", "to": "prewarm", "time": 0.5},
+            {"from": "prewarm", "to": "warm", "time": 0.3},
+            {"from": "warm", "to": "running", "time": 0.0},
+            {"from": "running", "to": "warm", "time": 0.0},
+            {"from": "warm", "to": "evicted", "time": 0.0},
+            {"from": "prewarm", "to": "evicted", "time": 0.0},
+        ],
+    }
+
+
 def _make_config(
     min_instances=0,
     max_instances=0,
@@ -33,11 +54,10 @@ def _make_config(
                 "service_id": "svc-a",
                 "arrival_rate": arrival_rate,
                 "job_size": 0.1,
-                "memory": memory,
-                "cpu": cpu,
                 "max_concurrency": max_concurrency,
                 "min_instances": min_instances,
                 "max_instances": max_instances,
+                "lifecycle": _make_lifecycle(memory=memory, cpu=cpu),
             }
         ],
         "cluster": {
@@ -561,9 +581,8 @@ class TestValidation:
             "service_id": "svc-test",
             "arrival_rate": 1.0,
             "job_size": 0.1,
-            "memory": 128,
-            "cpu": 0.5,
             "max_concurrency": 1,
+            "lifecycle": _make_lifecycle(memory=128, cpu=0.5),
         }
         svc = ServiceClass.from_config(cfg)
         assert svc.min_instances == 0
