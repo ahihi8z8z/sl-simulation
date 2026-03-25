@@ -49,23 +49,14 @@
       "lifecycle": {
         "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
         "transition_profile": "configs/simulation/sample_transition_profile.csv",
+        "state_profile": "configs/simulation/sample_state_resources.csv",
         "states": [
-          {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
-          {"name": "prewarm", "category": "stable", "cpu": 0.1, "memory": 256},
-          {"name": "code_loaded", "category": "stable", "cpu": 0.3, "memory": 768, "service_bound": true},
-          {"name": "warm", "category": "stable", "cpu": 0.5, "memory": 1024, "service_bound": true, "reusable": true},
-          {"name": "running", "category": "transient", "cpu": 2.0, "memory": 1024, "service_bound": true, "reusable": false},
-          {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": false}
-        ],
-        "transitions": [
-          {"from": "null", "to": "prewarm", "time": 0.5},
-          {"from": "prewarm", "to": "code_loaded", "time": 0.8},
-          {"from": "code_loaded", "to": "warm", "time": 0.3},
-          {"from": "warm", "to": "running", "time": 0.0},
-          {"from": "running", "to": "warm", "time": 0.0},
-          {"from": "warm", "to": "evicted", "time": 0.0},
-          {"from": "prewarm", "to": "evicted", "time": 0.0},
-          {"from": "code_loaded", "to": "evicted", "time": 0.0}
+          {"name": "null", "category": "stable"},
+          {"name": "prewarm", "category": "stable"},
+          {"name": "code_loaded", "category": "stable", "service_bound": true},
+          {"name": "warm", "category": "stable", "service_bound": true, "reusable": true},
+          {"name": "running", "category": "transient", "service_bound": true, "reusable": false},
+          {"name": "evicted", "category": "stable", "reusable": false}
         ]
       }
     },

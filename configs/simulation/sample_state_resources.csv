@@ -1,0 +1,7 @@
+state,cpu,memory
+null,0,0
+prewarm,0.1,128
+code_loaded,0.3,256
+warm,0.5,512
+running,1.0,512
+evicted,0,0

@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import csv
+import os
+
 from serverless_sim.lifecycle.state_definition import StateDefinition
 from serverless_sim.lifecycle.transition_definition import TransitionDefinition
 from serverless_sim.lifecycle.transition_model import (
@@ -189,6 +192,11 @@ class OpenWhiskExtendedStateMachine:
             )
             sm.add_state(sd)
 
+        # Override state resources from CSV if provided
+        state_profile = lifecycle_cfg.get("state_profile")
+        if state_profile:
+            sm._apply_state_profile(state_profile)
+
         # Validate required states
         required = {"null", "warm", "running", "evicted"}
         missing = required - set(sm.states.keys())
@@ -245,6 +253,27 @@ class OpenWhiskExtendedStateMachine:
         if not lifecycle_cfg:
             return cls.default()
         return cls.from_lifecycle_config(lifecycle_cfg)
+
+    def _apply_state_profile(self, csv_path: str) -> None:
+        """Override state cpu/memory from a CSV file.
+
+        CSV format::
+
+            state,cpu,memory
+            null,0,0
+            prewarm,0.1,128
+            warm,0.5,512
+            running,1.0,512
+
+        States not in the CSV are left unchanged.
+        """
+        with open(csv_path) as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                state_name = row["state"]
+                if state_name in self.states:
+                    self.states[state_name].cpu = float(row.get("cpu", 0))
+                    self.states[state_name].memory = float(row.get("memory", 0))
 
     def _generate_transitions_from_chain(self, chain: list[str]) -> None:
         """Auto-generate transitions from cold_start_chain.
