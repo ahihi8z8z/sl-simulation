@@ -8,7 +8,7 @@ import simpy
 from serverless_sim.core.simulation.sim_context import SimContext
 from serverless_sim.cluster.cluster_manager import ClusterManager
 from serverless_sim.workload.workload_manager import WorkloadManager
-from serverless_sim.scheduling.load_balancer import ShardingContainerPoolBalancer
+from serverless_sim.scheduling.load_balancer import create_load_balancer
 from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
 from serverless_sim.monitoring.monitor_manager import MonitorManager
 from serverless_sim.export.export_manager import ExportManager
@@ -49,8 +49,8 @@ class SimulationBuilder:
         # Lifecycle (per-service state machines are in ServiceClass)
         ctx.lifecycle_manager = LifecycleManager(ctx)
 
-        # Load balancer
-        ctx.dispatcher = ShardingContainerPoolBalancer(ctx)
+        # Load balancer (config-driven: scheduling.strategy)
+        ctx.dispatcher = create_load_balancer(ctx)
 
         # Wire context into nodes
         ctx.cluster_manager.set_context(ctx)
