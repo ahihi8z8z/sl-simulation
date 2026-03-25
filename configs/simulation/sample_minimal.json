@@ -18,8 +18,7 @@
           {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
           {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 128},
           {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 256, "service_bound": true, "reusable": true},
-          {"name": "running", "category": "transient", "cpu": 1.0, "memory": 256, "service_bound": true, "reusable": false},
-          {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": false}
+          {"name": "running", "category": "transient", "cpu": 1.0, "memory": 256, "service_bound": true}
         ],
         "transitions": [
           {"from": "null", "to": "prewarm", "time": 0.5},

@@ -103,11 +103,10 @@ class TestExtendedStateMachine:
     def test_missing_required_state_raises(self):
         bad_lifecycle = {
             "states": [
-                {"name": "null", "category": "stable"},
-                {"name": "warm", "category": "stable"},
-                # missing running and evicted
+                {"name": "prewarm", "category": "stable"},
+                # missing null and warm
             ],
-            "transitions": [],
+            "cold_start_chain": ["null", "prewarm", "warm"],
         }
         import pytest
         with pytest.raises(ValueError, match="missing required states"):

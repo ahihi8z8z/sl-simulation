@@ -23,8 +23,7 @@
           {"name": "null", "category": "stable"},
           {"name": "prewarm", "category": "stable"},
           {"name": "warm", "category": "stable", "service_bound": true, "reusable": true},
-          {"name": "running", "category": "transient", "service_bound": true, "reusable": false},
-          {"name": "evicted", "category": "stable", "reusable": false}
+          {"name": "running", "category": "transient", "service_bound": true}
         ]
       }
     }

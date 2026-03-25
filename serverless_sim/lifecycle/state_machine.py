@@ -192,13 +192,19 @@ class OpenWhiskExtendedStateMachine:
             )
             sm.add_state(sd)
 
+        # Auto-add internal states if not declared
+        if "evicted" not in sm.states:
+            sm.add_state(StateDefinition("evicted", "stable", cpu=0.0, memory=0.0, reusable=False))
+        if "running" not in sm.states:
+            sm.add_state(StateDefinition("running", "transient", service_bound=True, reusable=False))
+
         # Override state resources from CSV if provided
         state_profile = lifecycle_cfg.get("state_profile")
         if state_profile:
             sm._apply_state_profile(state_profile)
 
         # Validate required states
-        required = {"null", "warm", "running", "evicted"}
+        required = {"null", "warm"}
         missing = required - set(sm.states.keys())
         if missing:
             raise ValueError(f"Lifecycle config missing required states: {missing}")
