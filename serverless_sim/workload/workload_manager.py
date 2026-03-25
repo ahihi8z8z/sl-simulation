@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from serverless_sim.workload.generators import PoissonFixedSizeGenerator
+from serverless_sim.workload.generators import BaseGenerator, PoissonFixedSizeGenerator
 from serverless_sim.workload.service_class import ServiceClass
 
 if TYPE_CHECKING:
@@ -12,10 +12,10 @@ if TYPE_CHECKING:
 class WorkloadManager:
     """Manages services and workload generation."""
 
-    def __init__(self, ctx: SimContext):
+    def __init__(self, ctx: SimContext, generator: BaseGenerator | None = None):
         self.ctx = ctx
         self.services: dict[str, ServiceClass] = {}
-        self.generator = PoissonFixedSizeGenerator()
+        self.generator = generator or PoissonFixedSizeGenerator()
         self.generator.attach(ctx)
 
     def register_service(self, service: ServiceClass) -> None:
@@ -37,8 +37,24 @@ class WorkloadManager:
 
     @classmethod
     def from_config(cls, ctx: SimContext) -> "WorkloadManager":
-        """Build a WorkloadManager and register services from config."""
-        wm = cls(ctx)
+        """Build a WorkloadManager and register services from config.
+
+        If ``config["workload"]["generator"]`` is ``"trace"`` and
+        ``config["workload"]["trace_path"]`` is set, uses
+        TraceReplayGenerator instead of PoissonFixedSizeGenerator.
+        """
+        workload_cfg = ctx.config.get("workload", {})
+        gen_type = workload_cfg.get("generator", "poisson")
+
+        generator: BaseGenerator
+        if gen_type == "trace":
+            from serverless_sim.workload.trace_generator import TraceReplayGenerator
+            trace_path = workload_cfg["trace_path"]
+            generator = TraceReplayGenerator(trace_path)
+        else:
+            generator = PoissonFixedSizeGenerator()
+
+        wm = cls(ctx, generator=generator)
         for svc_cfg in ctx.config["services"]:
             service = ServiceClass.from_config(svc_cfg)
             wm.register_service(service)

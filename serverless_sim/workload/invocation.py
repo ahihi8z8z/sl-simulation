@@ -22,6 +22,9 @@ class Invocation:
     assigned_node_id: Optional[str] = None
     assigned_instance_id: Optional[str] = None
 
+    # Pre-computed service time (set by trace generator, used by PrecomputedServingModel)
+    service_time: Optional[float] = None
+
     cold_start: bool = False
     dropped: bool = False
     drop_reason: Optional[str] = None  # "no_capacity", "no_nodes"

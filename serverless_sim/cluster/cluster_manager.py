@@ -8,7 +8,7 @@ import simpy
 from serverless_sim.cluster.compute_class import ComputeClass
 from serverless_sim.cluster.node import Node
 from serverless_sim.cluster.resource_profile import ResourceProfile
-from serverless_sim.cluster.serving_model import FixedRateModel
+from serverless_sim.cluster.serving_model import FixedRateModel, PrecomputedServingModel
 
 if TYPE_CHECKING:
     from serverless_sim.core.simulation.sim_context import SimContext
@@ -35,6 +35,9 @@ class ClusterManager:
         # Optional top-level compute class defaults
         default_processing_factor = cluster_cfg.get("processing_factor", 1.0)
 
+        # Serving model selection from config
+        serving_model_type = cluster_cfg.get("serving_model", "fixed_rate")
+
         for node_cfg in cluster_cfg["nodes"]:
             node_id = node_cfg["node_id"]
             capacity = ResourceProfile(
@@ -48,9 +51,12 @@ class ClusterManager:
                 ),
                 max_queue_depth=node_cfg.get("max_queue_depth", 0),
             )
-            serving_model = FixedRateModel(
-                processing_factor=compute_class.processing_factor
-            )
+            if serving_model_type == "precomputed":
+                serving_model = PrecomputedServingModel()
+            else:
+                serving_model = FixedRateModel(
+                    processing_factor=compute_class.processing_factor
+                )
             node = Node(
                 env=self.env,
                 node_id=node_id,

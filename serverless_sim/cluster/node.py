@@ -147,7 +147,7 @@ class Node:
 
         # Compute service time
         service_time = self.serving_model.estimate_service_time(
-            invocation.job_size, self
+            invocation.job_size, self, service_time=invocation.service_time,
         )
         yield self.env.timeout(service_time)
 
