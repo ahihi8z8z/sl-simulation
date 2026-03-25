@@ -112,6 +112,9 @@
       }
     ]
   },
+  "scheduling": {
+    "strategy": "power_of_two_choices"
+  },
   "autoscaling": {
     "enabled": true,
     "reconcile_interval": 5.0
