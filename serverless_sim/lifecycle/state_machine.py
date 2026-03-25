@@ -163,7 +163,7 @@ class OpenWhiskExtendedStateMachine:
               "transitions": [{"from": "null", "to": "prewarm", "time": 0.5}, ...]
             }
 
-        Config format (CSV trace)::
+        Config format (CSV trace, no transitions needed)::
 
             {
               "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
@@ -171,10 +171,10 @@ class OpenWhiskExtendedStateMachine:
               "transition_profile": "path/to/transitions.csv"
             }
 
-        When ``transition_profile`` is set, transition times/resources are
-        sampled from the CSV.  ``transitions`` is still required for graph
-        structure (which transitions exist), but ``time``/``cpu``/``memory``
-        values are ignored.
+        When ``transition_profile`` is set and ``transitions`` is absent,
+        the graph structure is auto-generated from ``cold_start_chain``
+        plus ``warm ↔ running`` and ``* → evicted`` for all stable
+        intermediate states.  Time/cpu/memory values come from the CSV.
         """
         sm = cls()
 
@@ -189,24 +189,36 @@ class OpenWhiskExtendedStateMachine:
             )
             sm.add_state(sd)
 
-        for t_cfg in lifecycle_cfg.get("transitions", []):
-            td = TransitionDefinition(
-                from_state=t_cfg["from"],
-                to_state=t_cfg["to"],
-                transition_time=t_cfg.get("time", 0.0),
-                transition_cpu=t_cfg.get("cpu", 0.0),
-                transition_memory=t_cfg.get("memory", 0.0),
-            )
-            sm.add_transition(td)
-
         # Validate required states
         required = {"null", "warm", "running", "evicted"}
         missing = required - set(sm.states.keys())
         if missing:
             raise ValueError(f"Lifecycle config missing required states: {missing}")
 
-        # Set cold-start chain
+        transitions_cfg = lifecycle_cfg.get("transitions")
         chain_cfg = lifecycle_cfg.get("cold_start_chain")
+
+        if transitions_cfg:
+            # Explicit transitions
+            for t_cfg in transitions_cfg:
+                td = TransitionDefinition(
+                    from_state=t_cfg["from"],
+                    to_state=t_cfg["to"],
+                    transition_time=t_cfg.get("time", 0.0),
+                    transition_cpu=t_cfg.get("cpu", 0.0),
+                    transition_memory=t_cfg.get("memory", 0.0),
+                )
+                sm.add_transition(td)
+        elif chain_cfg:
+            # Auto-generate transitions from chain
+            sm._generate_transitions_from_chain(chain_cfg)
+        else:
+            raise ValueError(
+                "Lifecycle config requires either 'transitions' or "
+                "'cold_start_chain' (to auto-generate transitions)"
+            )
+
+        # Set cold-start chain
         if chain_cfg:
             sm.set_cold_start_chain(chain_cfg)
         else:
@@ -233,6 +245,29 @@ class OpenWhiskExtendedStateMachine:
         if not lifecycle_cfg:
             return cls.default()
         return cls.from_lifecycle_config(lifecycle_cfg)
+
+    def _generate_transitions_from_chain(self, chain: list[str]) -> None:
+        """Auto-generate transitions from cold_start_chain.
+
+        Creates:
+        - Chain transitions: each consecutive pair in the chain
+        - Execution cycle: warm → running, running → warm
+        - Eviction: every stable intermediate state → evicted, plus warm → evicted
+        """
+        # Chain transitions (null→prewarm, prewarm→warm, etc.)
+        for i in range(len(chain) - 1):
+            self.add_transition(TransitionDefinition(chain[i], chain[i + 1]))
+
+        # Execution cycle
+        self.add_transition(TransitionDefinition("warm", "running"))
+        self.add_transition(TransitionDefinition("running", "warm"))
+
+        # Eviction: all stable states except null and evicted → evicted
+        for name, sd in self.states.items():
+            if sd.is_stable and name not in ("null", "evicted"):
+                key = (name, "evicted")
+                if key not in self.transitions:
+                    self.add_transition(TransitionDefinition(name, "evicted"))
 
     def _infer_chain(self) -> list[str]:
         """Infer linear chain from null to warm by following transitions.
