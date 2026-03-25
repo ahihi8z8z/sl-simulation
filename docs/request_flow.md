@@ -114,10 +114,13 @@ instance = yield cold_start_proc
 2. Allocate memory trên node: `node.allocate(ResourceProfile(cpu=0, memory=service.memory))`
 3. Lấy cold-start chain từ state machine (tuyến tính: `null → ... → warm`)
 4. Đi qua từng transition:
+   - Lấy `time`, `cpu`, `memory` từ `TransitionModel` (có thể cố định hoặc sample ngẫu nhiên tùy cấu hình)
    - Allocate transition resources (cpu, memory tạm thời)
    - `yield env.timeout(transition_time)`
    - Release transition resources
 5. Set `instance.state = "warm"`
+
+**Lưu ý:** Khi dùng `CsvSampleTransitionModel` (cấu hình `transition_profile` trong lifecycle), giá trị `time`/`cpu`/`memory` được sample từ dữ liệu CSV thay vì lấy giá trị cố định từ config. Mỗi cold start có thể có tổng thời gian khác nhau.
 
 ## Phase 5: Concurrency Slot
 

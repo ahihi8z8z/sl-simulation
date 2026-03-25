@@ -213,9 +213,33 @@ Nếu không khai báo `cold_start_chain`, hệ thống tự suy bằng cách đ
 |-----|------|----------|-------|
 | `from` | str | bắt buộc | State nguồn |
 | `to` | str | bắt buộc | State đích |
-| `time` | float | 0.0 | Thời gian chuyển đổi (giây) |
-| `cpu` | float | 0.0 | CPU tạm thời trong quá trình chuyển đổi |
-| `memory` | float | 0.0 | Memory tạm thời trong quá trình chuyển đổi |
+| `time` | float | 0.0 | Thời gian chuyển đổi (giây). Bị bỏ qua nếu dùng `transition_profile` |
+| `cpu` | float | 0.0 | CPU tạm thời trong quá trình chuyển đổi. Bị bỏ qua nếu dùng `transition_profile` |
+| `memory` | float | 0.0 | Memory tạm thời trong quá trình chuyển đổi. Bị bỏ qua nếu dùng `transition_profile` |
+
+**transition_profile (tùy chọn):**
+
+| Key | Type | Mặc định | Mô tả |
+|-----|------|----------|-------|
+| `transition_profile` | str | null | Đường dẫn đến file CSV chứa dữ liệu transition thực tế. Khi được set, `time`/`cpu`/`memory` trong `transitions` bị bỏ qua — chỉ cấu trúc đồ thị (`from`/`to`) được giữ lại |
+
+Khi `transition_profile` được chỉ định, hệ thống dùng `CsvSampleTransitionModel` — mỗi lần chuyển trạng thái, giá trị `time`, `cpu`, `memory` được sample ngẫu nhiên từ các hàng tương ứng trong file CSV (uniform random). Điều này cho phép mô phỏng biến thiên thực tế của cold start time.
+
+Nếu không có `transition_profile`, hệ thống dùng `DeterministicTransitionModel` — giá trị `time`/`cpu`/`memory` cố định từ config (backward compatible).
+
+**Định dạng CSV:**
+
+```csv
+from_state,to_state,time,cpu,memory
+null,prewarm,0.45,0.1,0
+null,prewarm,0.52,0.12,0
+prewarm,warm,0.28,0,0
+prewarm,warm,0.35,0,0
+```
+
+Mỗi dòng là một quan sát (observation) cho transition `from_state → to_state`. Có thể có nhiều dòng cho cùng một cặp `(from_state, to_state)` — hệ thống sẽ sample ngẫu nhiên từ tập dữ liệu đó.
+
+Ngoài ra, có thể dùng `DistributionTransitionModel` (lognormal/normal/uniform) bằng code — xem module `lifecycle/transition_model.py`.
 
 Nếu không có section `lifecycle`, hệ thống dùng default chain:
 ```
@@ -306,6 +330,7 @@ null --0.5s--> prewarm --0.3s--> warm
 |------|-------|
 | `configs/simulation/sample_minimal.json` | 1 service, 1 node, autoscaling on, 60s |
 | `configs/simulation/sample_extended_states.json` | Custom lifecycle (code_loaded state), 30s |
+| `configs/simulation/sample_csv_profile.json` | Lifecycle với transition_profile (CSV sampling) |
 | `configs/simulation/sample_multi_service.json` | 3 services, 2 nodes, controller on, 30s |
 | `configs/gym/sample_gym_discrete.json` | Gym env với 5s step, max 50 steps |
 | `configs/rl/sample_ppo_train.json` | PPO training 1000 timesteps, 2 envs |

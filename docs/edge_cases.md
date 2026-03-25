@@ -166,6 +166,8 @@ Là tổng transition time trên cold-start chain (tuyến tính, chỉ có 1 đ
 - Default chain `["null", "prewarm", "warm"]`: 0.5s + 0.3s = **0.8s**
 - Extended chain `["null", "prewarm", "code_loaded", "warm"]`: 0.3 + 0.4 + 0.2 = **0.9s**
 
+Khi dùng `CsvSampleTransitionModel` hoặc `DistributionTransitionModel`, thời gian cold start **không cố định** — mỗi lần chuyển trạng thái, giá trị `time` (và `cpu`, `memory`) được sample ngẫu nhiên. Tổng cold start time sẽ biến thiên giữa các request, phản ánh sát hơn hành vi thực tế của hệ thống serverless.
+
 ### Tài nguyên cold start
 
 Ngoài memory (allocate 1 lần khi tạo instance), mỗi transition có thể dùng thêm CPU/memory tạm thời:
