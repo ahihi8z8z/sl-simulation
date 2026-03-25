@@ -2,7 +2,7 @@
   "simulation": {
     "duration": 30.0,
     "seed": 42,
-    "export_mode": 1
+    "export_mode": 2
   },
   "services": [
     {
@@ -12,6 +12,10 @@
       "max_concurrency": 8,
       "min_instances": 2,
       "max_instances": 0,
+      "autoscaling_defaults": {
+        "idle_timeout": 30.0,
+        "pool_targets": {"prewarm": 2}
+      },
       "lifecycle": {
         "cold_start_chain": ["null", "prewarm", "warm"],
         "states": [
@@ -38,8 +42,13 @@
       "max_concurrency": 2,
       "min_instances": 1,
       "max_instances": 0,
+      "autoscaling_defaults": {
+        "idle_timeout": 60.0,
+        "pool_targets": {"prewarm": 1, "code_loaded": 1}
+      },
       "lifecycle": {
         "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
+        "transition_profile": "configs/simulation/sample_transition_profile.csv",
         "states": [
           {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
           {"name": "prewarm", "category": "stable", "cpu": 0.1, "memory": 256},
@@ -112,7 +121,7 @@
     "interval": 5.0,
     "cpu_high": 0.7,
     "cpu_low": 0.2,
-    "prewarm_max": 5
+    "pool_target_max": 5
   },
   "monitoring": {
     "interval": 1.0,

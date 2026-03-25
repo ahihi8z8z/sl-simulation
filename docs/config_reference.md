@@ -329,9 +329,8 @@ null --0.5s--> prewarm --0.3s--> warm
 | File | Mô tả |
 |------|-------|
 | `configs/simulation/sample_minimal.json` | 1 service, 1 node, autoscaling on, 60s |
-| `configs/simulation/sample_extended_states.json` | Custom lifecycle (code_loaded state), 30s |
-| `configs/simulation/sample_csv_profile.json` | Lifecycle với transition_profile (CSV sampling) |
-| `configs/simulation/sample_multi_service.json` | 3 services, 2 nodes, controller on, 30s |
+| `configs/simulation/sample_full.json` | 3 services (basic + extended chain + transition_profile CSV), 2 nodes, controller, autoscaling_defaults |
+| `configs/simulation/sample_trace_replay.json` | Trace-driven workload (CSV trace), precomputed serving model |
 | `configs/gym/sample_gym_discrete.json` | Gym env với 5s step, max 50 steps |
 | `configs/rl/sample_ppo_train.json` | PPO training 1000 timesteps, 2 envs |
 | `configs/rl/sample_ppo_infer.json` | Inference 2 episodes |
