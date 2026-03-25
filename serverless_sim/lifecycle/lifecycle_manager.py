@@ -95,21 +95,22 @@ class LifecycleManager:
             self._transition_state(node, instance, "warm")
             return instance
 
+        rng = self.ctx.rng
+
         for i in range(len(path) - 1):
             s_from = path[i]
             s_to = path[i + 1]
-            td = sm.get_transition(s_from, s_to)
 
             instance.target_state = s_to
 
-            if td:
-                if td.transition_cpu > 0 or td.transition_memory > 0:
-                    trans_res = ResourceProfile(cpu=td.transition_cpu, memory=td.transition_memory)
-                    node.allocate(trans_res)
-                if td.transition_time > 0:
-                    yield self.ctx.env.timeout(td.transition_time)
-                if td.transition_cpu > 0 or td.transition_memory > 0:
-                    node.release(trans_res)
+            sample = sm.transition_model.sample(s_from, s_to, rng)
+            if sample.cpu > 0 or sample.memory > 0:
+                trans_res = ResourceProfile(cpu=sample.cpu, memory=sample.memory)
+                node.allocate(trans_res)
+            if sample.time > 0:
+                yield self.ctx.env.timeout(sample.time)
+            if sample.cpu > 0 or sample.memory > 0:
+                node.release(trans_res)
 
             self._transition_state(node, instance, s_to)
 
@@ -155,26 +156,27 @@ class LifecycleManager:
             path = ["null", target_state]
 
         # Walk the path, applying transitions and state resource changes
+        rng = self.ctx.rng
         for i in range(len(path) - 1):
             from_state = path[i]
             to_state = path[i + 1]
-            td = sm.get_transition(from_state, to_state)
 
             inst.state = from_state
             inst.target_state = to_state
             inst.state_entered_at = self.ctx.env.now
 
-            if td:
-                # Allocate transition resources (temporary)
-                if td.transition_cpu > 0 or td.transition_memory > 0:
-                    trans_res = ResourceProfile(cpu=td.transition_cpu, memory=td.transition_memory)
-                    node.allocate(trans_res)
+            # Sample transition parameters from the model
+            sample = sm.transition_model.sample(from_state, to_state, rng)
 
-                if td.transition_time > 0:
-                    yield self.ctx.env.timeout(td.transition_time)
+            if sample.cpu > 0 or sample.memory > 0:
+                trans_res = ResourceProfile(cpu=sample.cpu, memory=sample.memory)
+                node.allocate(trans_res)
 
-                if td.transition_cpu > 0 or td.transition_memory > 0:
-                    node.release(trans_res)
+            if sample.time > 0:
+                yield self.ctx.env.timeout(sample.time)
+
+            if sample.cpu > 0 or sample.memory > 0:
+                node.release(trans_res)
 
             # Transition state resources: release old, allocate new
             self._transition_state(node, inst, to_state)

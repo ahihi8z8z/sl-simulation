@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from serverless_sim.lifecycle.state_definition import StateDefinition
 from serverless_sim.lifecycle.transition_definition import TransitionDefinition
+from serverless_sim.lifecycle.transition_model import (
+    BaseTransitionModel,
+    DeterministicTransitionModel,
+)
 
 
 class OpenWhiskExtendedStateMachine:
@@ -24,6 +28,7 @@ class OpenWhiskExtendedStateMachine:
         self.states: dict[str, StateDefinition] = {}
         self.transitions: dict[tuple[str, str], TransitionDefinition] = {}
         self._cold_start_chain: list[str] = []
+        self.transition_model: BaseTransitionModel = DeterministicTransitionModel()
 
     # ------------------------------------------------------------------
     # Build helpers
@@ -133,23 +138,43 @@ class OpenWhiskExtendedStateMachine:
         sm.add_transition(TransitionDefinition("prewarm", "evicted", transition_time=0.0))
 
         sm.set_cold_start_chain(["null", "prewarm", "warm"])
+
+        # Build deterministic transition model from TransitionDefinitions
+        sm._build_deterministic_model()
         return sm
+
+    def _build_deterministic_model(self) -> None:
+        """Populate transition_model from TransitionDefinition values."""
+        model = DeterministicTransitionModel()
+        for (f, t), td in self.transitions.items():
+            model.set(f, t, time=td.transition_time,
+                      cpu=td.transition_cpu, memory=td.transition_memory)
+        self.transition_model = model
 
     @classmethod
     def from_lifecycle_config(cls, lifecycle_cfg: dict) -> OpenWhiskExtendedStateMachine:
         """Build a state machine from a lifecycle config dict.
 
-        Config format::
+        Config format (deterministic transitions)::
 
             {
               "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
-              "states": [
-                {"name": "null", "cpu": 0, "memory": 0},
-                {"name": "prewarm", "cpu": 0.1, "memory": 128},
-                ...
-              ],
-              "transitions": [...]
+              "states": [...],
+              "transitions": [{"from": "null", "to": "prewarm", "time": 0.5}, ...]
             }
+
+        Config format (CSV trace)::
+
+            {
+              "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
+              "states": [...],
+              "transition_profile": "path/to/transitions.csv"
+            }
+
+        When ``transition_profile`` is set, transition times/resources are
+        sampled from the CSV.  ``transitions`` is still required for graph
+        structure (which transitions exist), but ``time``/``cpu``/``memory``
+        values are ignored.
         """
         sm = cls()
 
@@ -185,9 +210,16 @@ class OpenWhiskExtendedStateMachine:
         if chain_cfg:
             sm.set_cold_start_chain(chain_cfg)
         else:
-            # Infer chain by following forward transitions from null → warm
             chain = sm._infer_chain()
             sm.set_cold_start_chain(chain)
+
+        # Build transition model
+        csv_path = lifecycle_cfg.get("transition_profile")
+        if csv_path:
+            from serverless_sim.lifecycle.transition_model import CsvSampleTransitionModel
+            sm.transition_model = CsvSampleTransitionModel.from_csv(csv_path)
+        else:
+            sm._build_deterministic_model()
 
         return sm
 
