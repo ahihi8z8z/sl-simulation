@@ -41,12 +41,22 @@ class OpenWhiskPoolAutoscaler:
         self._pending_creates: dict[str, int] = {}
         self._pending_time: float = -1.0
 
-        # Initialize from config
+        # Initialize from config (service config + optional autoscaling_defaults)
         for svc in ctx.workload_manager.services.values():
+            svc_cfg = self._find_service_config(svc.service_id)
+            defaults = svc_cfg.get("autoscaling_defaults", {}) if svc_cfg else {}
+
             self._min_instances[svc.service_id] = svc.min_instances
             self._max_instances[svc.service_id] = svc.max_instances
-            self._idle_timeout[svc.service_id] = 60.0
-            self._pool_targets[svc.service_id] = {}
+            self._idle_timeout[svc.service_id] = defaults.get("idle_timeout", 60.0)
+            self._pool_targets[svc.service_id] = dict(defaults.get("pool_targets", {}))
+
+    def _find_service_config(self, service_id: str) -> dict | None:
+        """Find the raw service config dict by service_id."""
+        for svc_cfg in self.ctx.config.get("services", []):
+            if svc_cfg.get("service_id") == service_id:
+                return svc_cfg
+        return None
 
     def _get_pool_states(self, service_id: str) -> list[str]:
         """Get intermediate states (between null and warm) for a service."""
