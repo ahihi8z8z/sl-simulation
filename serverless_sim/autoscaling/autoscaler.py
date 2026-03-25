@@ -235,10 +235,13 @@ class OpenWhiskPoolAutoscaler:
         return self._min_instances.get(service_id, 0)
 
     def set_min_instances(self, service_id: str, value: int) -> None:
+        old = self._min_instances.get(service_id, 0)
         self._min_instances[service_id] = value
-        # Trigger reactive fill on all nodes
-        for node in self.ctx.cluster_manager.get_enabled_nodes():
-            self.notify_pool_change(node.node_id, service_id)
+        if value < old:
+            self._evict_excess_warm(service_id)
+        elif value > old:
+            for node in self.ctx.cluster_manager.get_enabled_nodes():
+                self.notify_pool_change(node.node_id, service_id)
 
     def get_max_instances(self, service_id: str) -> int:
         return self._max_instances.get(service_id, 0)
@@ -257,7 +260,8 @@ class OpenWhiskPoolAutoscaler:
     def set_pool_target(self, service_id: str, state: str, count: int) -> None:
         """Set pool target for a specific state (must be an intermediate state).
 
-        Triggers reactive top-up on all nodes immediately.
+        If target increases, triggers reactive top-up on all nodes.
+        If target decreases, evicts excess pool containers at that state.
         """
         pool_states = self._get_pool_states(service_id)
         if state not in pool_states:
@@ -266,14 +270,60 @@ class OpenWhiskPoolAutoscaler:
                 state, pool_states,
             )
             return
+        old = self._pool_targets.get(service_id, {}).get(state, 0)
         self._pool_targets.setdefault(service_id, {})[state] = count
-        # Reactively fill on all nodes
-        for node in self.ctx.cluster_manager.get_enabled_nodes():
-            self.notify_pool_change(node.node_id, service_id)
+        if count < old:
+            self._evict_excess_pool(service_id, state)
+        elif count > old:
+            for node in self.ctx.cluster_manager.get_enabled_nodes():
+                self.notify_pool_change(node.node_id, service_id)
 
     def get_all_pool_targets(self, service_id: str) -> dict[str, int]:
         """Get all pool targets for a service."""
         return dict(self._pool_targets.get(service_id, {}))
+
+    # ------------------------------------------------------------------
+    # Excess eviction (when targets decrease)
+    # ------------------------------------------------------------------
+
+    def _evict_excess_pool(self, service_id: str, state: str) -> None:
+        """Evict excess idle pool containers at *state* when target decreases."""
+        target = self._pool_targets.get(service_id, {}).get(state, 0)
+        lm = self.ctx.lifecycle_manager
+
+        for node in self.ctx.cluster_manager.get_enabled_nodes():
+            at_state = [
+                i for i in lm.get_instances_for_node(node.node_id)
+                if i.service_id == service_id and i.state == state and i.is_idle
+            ]
+            excess = len(at_state) - target
+            if excess <= 0:
+                continue
+            # Evict oldest first
+            at_state.sort(key=lambda i: i.created_at)
+            for inst in at_state[:excess]:
+                lm.evict_instance(inst)
+
+    def _evict_excess_warm(self, service_id: str) -> None:
+        """Evict excess idle warm containers when min_instances decreases."""
+        min_inst = self._min_instances.get(service_id, 0)
+        lm = self.ctx.lifecycle_manager
+
+        while True:
+            alive = self._count_alive_instances(service_id)
+            if alive <= min_inst:
+                break
+            # Find an idle warm container to evict (oldest first)
+            candidate = None
+            for node in self.ctx.cluster_manager.get_enabled_nodes():
+                for inst in lm.get_instances_for_node(node.node_id):
+                    if (inst.service_id == service_id
+                            and inst.state == "warm" and inst.is_idle):
+                        if candidate is None or inst.last_used_at < candidate.last_used_at:
+                            candidate = inst
+            if candidate is None:
+                break  # no idle warm to evict
+            lm.evict_instance(candidate)
 
     # ------------------------------------------------------------------
     # Idle timeout
