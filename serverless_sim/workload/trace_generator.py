@@ -1,23 +1,22 @@
-"""Trace-replay workload generator.
+"""Trace-replay workload generators.
 
-Reads a CSV trace file and replays requests according to timestamps.
+Two generators are available:
 
-CSV format::
+**TraceReplayGenerator** — per-request timestamps::
 
     timestamp,function_id,duration,memory
     0.001,func-a,0.150,256
     0.003,func-b,2.000,512
-    0.005,func-a,0.145,256
 
-Columns:
-- ``timestamp``: arrival time in simulation seconds (float, required)
-- ``function_id``: maps to service_id (required)
-- ``duration``: execution duration in seconds (optional, sets ``service_time``)
-- ``memory``: memory in MB (optional, informational)
+**AggregateTraceGenerator** — request counts per minute::
 
-The generator creates ``Invocation`` objects at the specified timestamps.
-If ``duration`` is present, it is set as ``invocation.service_time`` for
-use with ``PrecomputedServingModel``.
+    minute,function_id,count,duration
+    0,func-a,5,0.15
+    1,func-a,10,0.15
+    1,func-b,3,2.0
+
+The aggregate generator distributes ``count`` requests evenly within
+each minute (interval = 60 / count).
 """
 
 from __future__ import annotations
@@ -162,6 +161,157 @@ class TraceReplayGenerator(BaseGenerator):
     def record_count(self) -> int:
         """Total number of records loaded."""
         return len(self._records)
+
+    @property
+    def function_ids(self) -> set[str]:
+        """Unique function_ids in the trace."""
+        return {r.function_id for r in self._records}
+
+
+# ------------------------------------------------------------------
+# Aggregate trace (counts per minute)
+# ------------------------------------------------------------------
+
+@dataclass
+class AggregateRecord:
+    """One row from the aggregate trace CSV."""
+    minute: int
+    function_id: str
+    count: int
+    duration: float | None = None
+
+
+class AggregateTraceGenerator(BaseGenerator):
+    """Replay requests from an aggregate trace (counts per minute).
+
+    CSV format::
+
+        minute,function_id,count,duration
+        0,func-a,5,0.15
+        1,func-a,10,0.15
+        1,func-b,3,2.0
+
+    For each row, ``count`` requests are distributed evenly within that
+    minute (interval = 60 / count).  If ``duration`` is present, it is
+    set as ``invocation.service_time`` for ``PrecomputedServingModel``.
+    """
+
+    MINUTE_SECONDS = 60.0
+
+    def __init__(self, trace_path: str):
+        self.ctx: SimContext | None = None
+        self._request_counter = 0
+        self._records: list[AggregateRecord] = []
+        self._load_trace(trace_path)
+
+    def _load_trace(self, path: str) -> None:
+        """Load aggregate trace and sort by minute."""
+        file_size_mb = os.path.getsize(path) / (1024 * 1024)
+        if file_size_mb > MAX_TRACE_SIZE_MB:
+            warnings.warn(
+                f"Trace file {path} is {file_size_mb:.0f} MB "
+                f"(>{MAX_TRACE_SIZE_MB} MB). This may use significant memory.",
+                stacklevel=2,
+            )
+
+        with open(path, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                record = AggregateRecord(
+                    minute=int(row["minute"]),
+                    function_id=row["function_id"],
+                    count=int(row["count"]),
+                    duration=float(row["duration"]) if "duration" in row and row["duration"] else None,
+                )
+                if record.count > 0:
+                    self._records.append(record)
+
+        self._records.sort(key=lambda r: r.minute)
+
+    def attach(self, ctx: SimContext) -> None:
+        self.ctx = ctx
+
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
+        """Start replay for a specific service."""
+        records = [r for r in self._records if r.function_id == service.service_id]
+        if records:
+            self.ctx.env.process(self._replay_loop(service, records, stop_time))
+
+    def start_all(self, stop_time: float | None = None) -> None:
+        """Start replay for ALL function_ids in the trace."""
+        by_function: dict[str, list[AggregateRecord]] = {}
+        for r in self._records:
+            by_function.setdefault(r.function_id, []).append(r)
+
+        for function_id, records in by_function.items():
+            service = self.ctx.workload_manager.services.get(function_id)
+            if service is None:
+                self.ctx.logger.debug(
+                    "Aggregate trace function_id '%s' not in config, skipping",
+                    function_id,
+                )
+                continue
+            self.ctx.env.process(self._replay_loop(service, records, stop_time))
+
+    def _replay_loop(
+        self,
+        service: ServiceClass,
+        records: list[AggregateRecord],
+        stop_time: float | None,
+    ):
+        """SimPy process: distribute count requests evenly within each minute."""
+        ctx = self.ctx
+        env = ctx.env
+
+        for record in records:
+            minute_start = record.minute * self.MINUTE_SECONDS
+            interval = self.MINUTE_SECONDS / record.count
+
+            for i in range(record.count):
+                target_time = minute_start + i * interval
+
+                if target_time > env.now:
+                    yield env.timeout(target_time - env.now)
+
+                if stop_time is not None and env.now >= stop_time:
+                    ctx.logger.debug(
+                        "t=%.3f | AGG_TRACE_STOP | %s (stop_time=%.1f)",
+                        env.now, service.service_id, stop_time,
+                    )
+                    return
+
+                self._request_counter += 1
+                request_id = f"req-{self._request_counter}"
+
+                inv = Invocation(
+                    request_id=request_id,
+                    service_id=service.service_id,
+                    arrival_time=env.now,
+                    job_size=record.duration if record.duration is not None else service.job_size,
+                    service_time=record.duration,
+                    status="arrived",
+                )
+
+                ctx.request_table[request_id] = inv
+
+                ctx.logger.debug(
+                    "t=%.3f | AGG_ARRIVE | %s service=%s (minute=%d, %d/%d)",
+                    env.now, request_id, service.service_id,
+                    record.minute, i + 1, record.count,
+                )
+
+                if ctx.dispatcher is not None:
+                    ctx.dispatcher.dispatch(inv)
+
+    @property
+    def record_count(self) -> int:
+        """Total number of aggregate records loaded."""
+        return len(self._records)
+
+    @property
+    def total_requests(self) -> int:
+        """Total requests that will be generated."""
+        return sum(r.count for r in self._records)
 
     @property
     def function_ids(self) -> set[str]:
