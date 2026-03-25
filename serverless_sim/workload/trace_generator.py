@@ -198,9 +198,10 @@ class AggregateTraceGenerator(BaseGenerator):
 
     MINUTE_SECONDS = 60.0
 
-    def __init__(self, trace_path: str):
+    def __init__(self, trace_path: str, scale: float = 1.0):
         self.ctx: SimContext | None = None
         self._request_counter = 0
+        self._scale = scale
         self._records: list[AggregateRecord] = []
         self._load_trace(trace_path)
 
@@ -265,9 +266,10 @@ class AggregateTraceGenerator(BaseGenerator):
 
         for record in records:
             minute_start = record.minute * self.MINUTE_SECONDS
-            interval = self.MINUTE_SECONDS / record.count
+            scaled_count = max(1, round(record.count * self._scale))
+            interval = self.MINUTE_SECONDS / scaled_count
 
-            for i in range(record.count):
+            for i in range(scaled_count):
                 target_time = minute_start + i * interval
 
                 if target_time > env.now:
@@ -310,8 +312,8 @@ class AggregateTraceGenerator(BaseGenerator):
 
     @property
     def total_requests(self) -> int:
-        """Total requests that will be generated."""
-        return sum(r.count for r in self._records)
+        """Total requests that will be generated (after scaling)."""
+        return sum(max(1, round(r.count * self._scale)) for r in self._records)
 
     @property
     def function_ids(self) -> set[str]:

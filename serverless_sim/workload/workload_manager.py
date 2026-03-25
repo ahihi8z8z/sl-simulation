@@ -54,7 +54,8 @@ class WorkloadManager:
         elif gen_type == "aggregate_trace":
             from serverless_sim.workload.trace_generator import AggregateTraceGenerator
             trace_path = workload_cfg["trace_path"]
-            generator = AggregateTraceGenerator(trace_path)
+            scale = workload_cfg.get("scale", 1.0)
+            generator = AggregateTraceGenerator(trace_path, scale=scale)
         else:
             generator = PoissonFixedSizeGenerator()
 
