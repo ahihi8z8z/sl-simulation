@@ -105,7 +105,12 @@ def plot_traffic_daily(ax, traffic_df: pd.DataFrame, label: str,
     unit_cfg = RATE_UNITS.get(rate_unit, RATE_UNITS["min"])
     df["smooth"] = df["smooth"] * unit_cfg["factor"]
 
-    ax.plot(df["day"], df["smooth"], color=TRAFFIC_COLOR, linewidth=1.5)
+    ax.plot(df["day"], df["smooth"], color=TRAFFIC_COLOR, linewidth=1.5, label="Traffic")
+
+    # Mean line
+    mean_val = df["smooth"].mean()
+    ax.axhline(y=mean_val, color="red", linestyle="--", linewidth=1, label=f"Mean: {mean_val:.2f}")
+    ax.legend(fontsize=9)
 
     ax.set_xlabel("Day", fontsize=10)
     ax.set_ylabel(unit_cfg["ylabel"], fontsize=10)
