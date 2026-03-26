@@ -39,8 +39,15 @@ class LifecycleManager:
         return self.instances.setdefault(node_id, [])
 
     def _state_resources(self, service_id: str, state: str) -> ResourceProfile:
-        """Get the resource profile for a service in a given state."""
+        """Get the resource profile for a service in a given state.
+
+        If the state machine has a state_resource_model, sample from it.
+        Otherwise use the fixed values from StateDefinition.
+        """
         sm = self._get_sm(service_id)
+        if sm.state_resource_model is not None:
+            sample = sm.state_resource_model.sample(state, self.ctx.rng)
+            return ResourceProfile(cpu=sample.cpu, memory=sample.memory)
         sd = sm.get_state(state)
         if sd is None:
             return ResourceProfile(cpu=0.0, memory=0.0)

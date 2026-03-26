@@ -1,10 +1,13 @@
-"""Pluggable models for sampling transition latency and resource usage.
+"""Pluggable models for sampling transition and state resource parameters.
 
-Three built-in models:
-
+Transition models (3 built-in):
 - **DeterministicTransitionModel** — fixed values (current default)
 - **CsvSampleTransitionModel** — sample from a CSV trace file
 - **DistributionTransitionModel** — sample from a statistical distribution
+
+State resource models (2 built-in):
+- **FixedStateResourceModel** — fixed cpu/memory per state (default, from config)
+- **CsvSampleStateResourceModel** — sample cpu/memory from CSV observations
 """
 
 from __future__ import annotations
@@ -148,3 +151,74 @@ class DistributionTransitionModel(BaseTransitionModel):
             return float(rng.uniform(low, high))
         else:
             return cfg.get("time", 0.0)
+
+
+# ================================================================== #
+# State resource models
+# ================================================================== #
+
+@dataclass
+class StateResourceSample:
+    """One sampled set of state resource parameters."""
+    cpu: float = 0.0
+    memory: float = 0.0
+
+
+class BaseStateResourceModel:
+    """Interface for state resource models."""
+
+    def sample(self, state: str, rng: np.random.Generator) -> StateResourceSample:
+        """Sample cpu/memory for a given state."""
+        raise NotImplementedError
+
+
+class FixedStateResourceModel(BaseStateResourceModel):
+    """Fixed cpu/memory per state (from StateDefinition, default)."""
+
+    def __init__(self):
+        self._values: dict[str, StateResourceSample] = {}
+
+    def set(self, state: str, cpu: float = 0.0, memory: float = 0.0) -> None:
+        self._values[state] = StateResourceSample(cpu, memory)
+
+    def sample(self, state: str, rng: np.random.Generator) -> StateResourceSample:
+        return self._values.get(state, StateResourceSample())
+
+
+class CsvSampleStateResourceModel(BaseStateResourceModel):
+    """Sample state cpu/memory from CSV observations.
+
+    CSV format::
+
+        state,cpu,memory
+        running,0.37,31.39
+        running,0.38,31.52
+        running,0.40,34.06
+
+    Multiple rows per state → uniform random sample.
+    States not in CSV → return (0, 0).
+    """
+
+    def __init__(self):
+        self._data: dict[str, list[StateResourceSample]] = {}
+
+    @classmethod
+    def from_csv(cls, path: str) -> CsvSampleStateResourceModel:
+        model = cls()
+        with open(path, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                state = row["state"]
+                s = StateResourceSample(
+                    cpu=float(row.get("cpu", 0)),
+                    memory=float(row.get("memory", 0)),
+                )
+                model._data.setdefault(state, []).append(s)
+        return model
+
+    def sample(self, state: str, rng: np.random.Generator) -> StateResourceSample:
+        samples = self._data.get(state)
+        if not samples:
+            return StateResourceSample()
+        idx = rng.integers(0, len(samples))
+        return samples[idx]

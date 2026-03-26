@@ -7,7 +7,9 @@ from serverless_sim.lifecycle.state_definition import StateDefinition
 from serverless_sim.lifecycle.transition_definition import TransitionDefinition
 from serverless_sim.lifecycle.transition_model import (
     BaseTransitionModel,
+    BaseStateResourceModel,
     DeterministicTransitionModel,
+    FixedStateResourceModel,
 )
 
 
@@ -32,6 +34,7 @@ class OpenWhiskExtendedStateMachine:
         self.transitions: dict[tuple[str, str], TransitionDefinition] = {}
         self._cold_start_chain: list[str] = []
         self.transition_model: BaseTransitionModel = DeterministicTransitionModel()
+        self.state_resource_model: BaseStateResourceModel | None = None
 
     # ------------------------------------------------------------------
     # Build helpers
@@ -198,10 +201,13 @@ class OpenWhiskExtendedStateMachine:
         if "running" not in sm.states:
             sm.add_state(StateDefinition("running", "transient", service_bound=True, reusable=False))
 
-        # Override state resources from CSV if provided
+        # State resource model from CSV if provided
         state_profile = lifecycle_cfg.get("state_profile")
         if state_profile:
-            sm._apply_state_profile(state_profile)
+            from serverless_sim.lifecycle.transition_model import CsvSampleStateResourceModel
+            sm.state_resource_model = CsvSampleStateResourceModel.from_csv(state_profile)
+            # Also set fixed values from mean (for peak_memory calculation etc.)
+            sm._apply_state_profile_means(state_profile)
 
         # Validate required states
         required = {"null", "warm"}
@@ -260,26 +266,28 @@ class OpenWhiskExtendedStateMachine:
             return cls.default()
         return cls.from_lifecycle_config(lifecycle_cfg)
 
-    def _apply_state_profile(self, csv_path: str) -> None:
-        """Override state cpu/memory from a CSV file.
+    def _apply_state_profile_means(self, csv_path: str) -> None:
+        """Set state cpu/memory to mean values from CSV (for peak calculations).
 
-        CSV format::
-
-            state,cpu,memory
-            null,0,0
-            prewarm,0.1,128
-            warm,0.5,512
-            running,1.0,512
-
-        States not in the CSV are left unchanged.
+        The actual runtime values are sampled by state_resource_model.
+        This sets the StateDefinition fields to means so that
+        peak_memory/peak_cpu calculations work correctly.
         """
+        by_state: dict[str, list[tuple[float, float]]] = {}
         with open(csv_path) as f:
             reader = csv.DictReader(f)
             for row in reader:
                 state_name = row["state"]
-                if state_name in self.states:
-                    self.states[state_name].cpu = float(row.get("cpu", 0))
-                    self.states[state_name].memory = float(row.get("memory", 0))
+                cpu = float(row.get("cpu", 0))
+                mem = float(row.get("memory", 0))
+                by_state.setdefault(state_name, []).append((cpu, mem))
+
+        for state_name, values in by_state.items():
+            if state_name in self.states:
+                mean_cpu = sum(v[0] for v in values) / len(values)
+                mean_mem = sum(v[1] for v in values) / len(values)
+                self.states[state_name].cpu = mean_cpu
+                self.states[state_name].memory = mean_mem
 
     def _generate_transitions_from_chain(self, chain: list[str]) -> None:
         """Auto-generate transitions from cold_start_chain.
