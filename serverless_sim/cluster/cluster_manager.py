@@ -39,39 +39,49 @@ class ClusterManager:
         serving_model_type = cluster_cfg.get("serving_model", "fixed_rate")
 
         for node_cfg in cluster_cfg["nodes"]:
-            node_id = node_cfg["node_id"]
-            capacity = ResourceProfile(
-                cpu=node_cfg["cpu_capacity"],
-                memory=node_cfg["memory_capacity"],
+            count = node_cfg.get("count", 1)
+            base_id = node_cfg.get("node_id", "node")
+            for ci in range(count):
+                node_id = f"{base_id}-{ci}" if count > 1 else base_id
+                self._create_node(node_id, node_cfg, default_processing_factor, serving_model_type)
+
+    def _create_node(self, node_id: str, node_cfg: dict,
+                     default_processing_factor: float, serving_model_type: str) -> None:
+        """Create a single node from config."""
+        if node_id in self.nodes:
+            return
+        capacity = ResourceProfile(
+            cpu=node_cfg["cpu_capacity"],
+            memory=node_cfg["memory_capacity"],
+        )
+        compute_class = ComputeClass(
+            class_id=node_cfg.get("compute_class", "default"),
+            processing_factor=node_cfg.get(
+                "processing_factor", default_processing_factor
+            ),
+            max_queue_depth=node_cfg.get("max_queue_depth", 0),
+        )
+        if serving_model_type == "precomputed":
+            serving_model = PrecomputedServingModel()
+        else:
+            serving_model = FixedRateModel(
+                processing_factor=compute_class.processing_factor
             )
-            compute_class = ComputeClass(
-                class_id=node_cfg.get("compute_class", "default"),
-                processing_factor=node_cfg.get(
-                    "processing_factor", default_processing_factor
-                ),
-                max_queue_depth=node_cfg.get("max_queue_depth", 0),
-            )
-            if serving_model_type == "precomputed":
-                serving_model = PrecomputedServingModel()
-            else:
-                serving_model = FixedRateModel(
-                    processing_factor=compute_class.processing_factor
-                )
-            node = Node(
-                env=self.env,
-                node_id=node_id,
-                capacity=capacity,
-                compute_class=compute_class,
-                serving_model=serving_model,
-                logger=self.logger,
-            )
-            self.nodes[node_id] = node
-            self.logger.info(
-                "Created node %s: cpu=%.1f, memory=%.0f",
-                node_id,
-                capacity.cpu,
-                capacity.memory,
-            )
+        node = Node(
+            env=self.env,
+            node_id=node_id,
+            capacity=capacity,
+            compute_class=compute_class,
+            serving_model=serving_model,
+            logger=self.logger,
+        )
+        self.nodes[node_id] = node
+        self.logger.info(
+            "Created node %s: cpu=%.1f, memory=%.0f",
+            node_id,
+            capacity.cpu,
+            capacity.memory,
+        )
 
     def get_enabled_nodes(self) -> list[Node]:
         """Return all enabled nodes."""
