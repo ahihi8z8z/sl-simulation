@@ -156,6 +156,8 @@ class LifecycleManager:
         null_res = self._state_resources(service_id, "null")
         if null_res.cpu > 0 or null_res.memory > 0:
             node.allocate(null_res)
+        inst.allocated_cpu = null_res.cpu
+        inst.allocated_memory = null_res.memory
 
         # Find path from null to target_state
         path = sm.find_path("null", target_state)
@@ -201,18 +203,23 @@ class LifecycleManager:
     def _transition_state(
         self, node: Node, instance: ContainerInstance, new_state: str,
     ) -> None:
-        """Change instance state and adjust node resources accordingly."""
-        old_state = instance.state
-        old_res = self._state_resources(instance.service_id, old_state)
+        """Change instance state and adjust node resources accordingly.
+
+        Releases exactly what was previously allocated (tracked on instance),
+        then samples and allocates new state resources.
+        """
+        # Release what was actually allocated (not re-sampled)
+        if instance.allocated_cpu > 0 or instance.allocated_memory > 0:
+            node.release(ResourceProfile(cpu=instance.allocated_cpu, memory=instance.allocated_memory))
+
+        # Sample and allocate new state resources
         new_res = self._state_resources(instance.service_id, new_state)
-
-        # Release old state resources
-        if old_res.cpu > 0 or old_res.memory > 0:
-            node.release(old_res)
-
-        # Allocate new state resources
         if new_res.cpu > 0 or new_res.memory > 0:
             node.allocate(new_res)
+
+        # Track what we allocated
+        instance.allocated_cpu = new_res.cpu
+        instance.allocated_memory = new_res.memory
 
         instance.state = new_state
         instance.target_state = None
@@ -263,10 +270,11 @@ class LifecycleManager:
 
         node = self.ctx.cluster_manager.get_node(instance.node_id)
 
-        # Release current state resources
-        cur_res = self._state_resources(instance.service_id, instance.state)
-        if cur_res.cpu > 0 or cur_res.memory > 0:
-            node.release(cur_res)
+        # Release what was actually allocated (tracked on instance)
+        if instance.allocated_cpu > 0 or instance.allocated_memory > 0:
+            node.release(ResourceProfile(cpu=instance.allocated_cpu, memory=instance.allocated_memory))
+            instance.allocated_cpu = 0.0
+            instance.allocated_memory = 0.0
 
         # Remove from instance list
         node_instances = self._get_instances(instance.node_id)

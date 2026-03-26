@@ -59,6 +59,15 @@ class Node:
         """Release previously allocated resources."""
         self.allocated = self.allocated.subtract(request)
         self.available = self.available.add(request)
+        # Clamp to avoid float precision artifacts
+        self.allocated = ResourceProfile(
+            cpu=max(0.0, self.allocated.cpu),
+            memory=max(0.0, self.allocated.memory),
+        )
+        self.available = ResourceProfile(
+            cpu=min(self.capacity.cpu, self.available.cpu),
+            memory=min(self.capacity.memory, self.available.memory),
+        )
 
     def can_fit(self, request: ResourceProfile) -> bool:
         """Check if resources can be allocated without modifying state."""

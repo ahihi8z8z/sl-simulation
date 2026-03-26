@@ -41,6 +41,10 @@ class ContainerInstance:
         # Request tracking
         self.active_requests: int = 0
 
+        # Currently allocated resources on node (for correct release)
+        self.allocated_cpu: float = 0.0
+        self.allocated_memory: float = 0.0
+
     @property
     def is_idle(self) -> bool:
         return self.active_requests == 0
