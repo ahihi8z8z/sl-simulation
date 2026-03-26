@@ -50,12 +50,24 @@ class ClusterCollector(BaseCollector):
         total_mem = sum(n.capacity.memory for n in nodes)
         used_mem = sum(n.allocated.memory for n in nodes)
 
+        # Resource used only by running containers
+        running_cpu = 0.0
+        running_mem = 0.0
+        if ctx.lifecycle_manager is not None:
+            for node in nodes:
+                for inst in ctx.lifecycle_manager.get_instances_for_node(node.node_id):
+                    if inst.state == "running":
+                        running_cpu += inst.allocated_cpu
+                        running_mem += inst.allocated_memory
+
         metrics["cluster.nodes_enabled"] = len(nodes)
         metrics["cluster.cpu_total"] = total_cpu
         metrics["cluster.cpu_used"] = used_cpu
+        metrics["cluster.cpu_used_running"] = running_cpu
         metrics["cluster.cpu_utilization"] = used_cpu / total_cpu if total_cpu > 0 else 0.0
         metrics["cluster.memory_total"] = total_mem
         metrics["cluster.memory_used"] = used_mem
+        metrics["cluster.memory_used_running"] = running_mem
         metrics["cluster.memory_utilization"] = used_mem / total_mem if total_mem > 0 else 0.0
 
         return metrics

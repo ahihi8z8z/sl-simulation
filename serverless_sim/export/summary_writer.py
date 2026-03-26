@@ -96,7 +96,48 @@ class SummaryWriter:
                     }
                 summary["autoscaling"] = autoscaling
 
+            # Effective resource ratio (accumulated, exact)
+            summary["effective_resource_ratio"] = self._compute_effective_ratio()
+
         with open(path, "w") as f:
             json.dump(summary, f, indent=2)
 
         return path
+
+    def _compute_effective_ratio(self) -> dict:
+        """Compute effective resource ratio from accumulated resource-seconds.
+
+        effective_cpu = running_cpu_seconds / total_cpu_seconds
+        effective_memory = running_memory_seconds / total_memory_seconds
+
+        Accumulated on every state transition and eviction — exact, no sampling.
+        """
+        lm = self.ctx.lifecycle_manager
+        if lm is None:
+            return {}
+
+        # Flush: accumulate for currently alive instances
+        now = self.ctx.env.now
+        total_cpu = lm.total_cpu_seconds
+        total_mem = lm.total_memory_seconds
+        running_cpu = lm.running_cpu_seconds
+        running_mem = lm.running_memory_seconds
+
+        for node in self.ctx.cluster_manager.get_enabled_nodes():
+            for inst in lm.get_instances_for_node(node.node_id):
+                time_in_state = now - inst.state_entered_at
+                if time_in_state > 0:
+                    total_cpu += time_in_state * inst.allocated_cpu
+                    total_mem += time_in_state * inst.allocated_memory
+                    if inst.state == "running":
+                        running_cpu += time_in_state * inst.allocated_cpu
+                        running_mem += time_in_state * inst.allocated_memory
+
+        return {
+            "cpu_effective_ratio": round(running_cpu / total_cpu, 4) if total_cpu > 0 else 0.0,
+            "memory_effective_ratio": round(running_mem / total_mem, 4) if total_mem > 0 else 0.0,
+            "total_cpu_seconds": round(total_cpu, 2),
+            "running_cpu_seconds": round(running_cpu, 2),
+            "total_memory_seconds": round(total_mem, 2),
+            "running_memory_seconds": round(running_mem, 2),
+        }

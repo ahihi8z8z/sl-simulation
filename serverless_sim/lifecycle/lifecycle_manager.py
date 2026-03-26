@@ -31,6 +31,12 @@ class LifecycleManager:
         self.instances: dict[str, list[ContainerInstance]] = {}
         self._evicted_count: int = 0
 
+        # Cumulative resource-seconds (for effective ratio)
+        self.total_cpu_seconds: float = 0.0
+        self.total_memory_seconds: float = 0.0
+        self.running_cpu_seconds: float = 0.0
+        self.running_memory_seconds: float = 0.0
+
     def _get_sm(self, service_id: str) -> OpenWhiskExtendedStateMachine:
         """Get the state machine for a service."""
         return self.ctx.workload_manager.services[service_id].state_machine
@@ -208,6 +214,15 @@ class LifecycleManager:
         Releases exactly what was previously allocated (tracked on instance),
         then samples and allocates new state resources.
         """
+        # Accumulate resource-seconds for old state
+        time_in_state = self.ctx.env.now - instance.state_entered_at
+        if time_in_state > 0:
+            self.total_cpu_seconds += time_in_state * instance.allocated_cpu
+            self.total_memory_seconds += time_in_state * instance.allocated_memory
+            if instance.state == "running":
+                self.running_cpu_seconds += time_in_state * instance.allocated_cpu
+                self.running_memory_seconds += time_in_state * instance.allocated_memory
+
         # Release what was actually allocated (not re-sampled)
         if instance.allocated_cpu > 0 or instance.allocated_memory > 0:
             node.release(ResourceProfile(cpu=instance.allocated_cpu, memory=instance.allocated_memory))
@@ -269,6 +284,15 @@ class LifecycleManager:
             return
 
         node = self.ctx.cluster_manager.get_node(instance.node_id)
+
+        # Accumulate resource-seconds for final state
+        time_in_state = self.ctx.env.now - instance.state_entered_at
+        if time_in_state > 0:
+            self.total_cpu_seconds += time_in_state * instance.allocated_cpu
+            self.total_memory_seconds += time_in_state * instance.allocated_memory
+            if instance.state == "running":
+                self.running_cpu_seconds += time_in_state * instance.allocated_cpu
+                self.running_memory_seconds += time_in_state * instance.allocated_memory
 
         # Release what was actually allocated (tracked on instance)
         if instance.allocated_cpu > 0 or instance.allocated_memory > 0:
