@@ -111,7 +111,9 @@ class HashRingBalancer(BaseLoadBalancer):
     def _hash_to_index(self, service_id: str, n: int) -> int:
         h = self._hash_cache.get(service_id)
         if h is None:
-            h = hash(service_id)
+            # Use hashlib for deterministic hashing (Python hash() varies per run)
+            import hashlib
+            h = int(hashlib.md5(service_id.encode()).hexdigest(), 16)
             self._hash_cache[service_id] = h
         return h % n
 

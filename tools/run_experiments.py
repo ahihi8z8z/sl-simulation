@@ -15,7 +15,7 @@ import time
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-def run_one(config_path: str, progress: bool = False) -> dict:
+def run_one(config_path: str, sweep_dir: str, progress: bool = False) -> dict:
     """Run a single simulation and return summary dict."""
     from serverless_sim.core.config.loader import load_config
     from serverless_sim.core.logging.logger_factory import create_logger
@@ -24,10 +24,9 @@ def run_one(config_path: str, progress: bool = False) -> dict:
 
     config = load_config(config_path)
 
-    # Create run dir under logs/
+    # Create run dir under sweep directory
     base_name = os.path.splitext(os.path.basename(config_path))[0]
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    run_dir = os.path.join("logs", f"run_{timestamp}_{base_name}")
+    run_dir = os.path.join(sweep_dir, base_name)
     os.makedirs(run_dir, exist_ok=True)
 
     logger = create_logger(
@@ -75,12 +74,21 @@ def main():
     configs = sorted(glob.glob(os.path.join(args.exp_dir, "*.json")))
     if args.filter:
         configs = [c for c in configs if args.filter in os.path.basename(c)]
+    # Exclude results.json from previous runs
+    configs = [c for c in configs if os.path.basename(c) != "results.json"]
 
     if not configs:
         print(f"No JSON configs found in {args.exp_dir}")
         return
 
-    print(f"Found {len(configs)} experiments in {args.exp_dir}:\n")
+    # Create sweep directory under logs/
+    exp_name = os.path.basename(os.path.normpath(args.exp_dir))
+    timestamp = time.strftime("%Y%m%d_%H%M%S")
+    sweep_dir = os.path.join("logs", f"sweep_{timestamp}_{exp_name}")
+    os.makedirs(sweep_dir, exist_ok=True)
+
+    print(f"Found {len(configs)} experiments in {args.exp_dir}")
+    print(f"Sweep directory: {sweep_dir}\n")
     for c in configs:
         print(f"  {os.path.basename(c)}")
     print()
@@ -92,7 +100,7 @@ def main():
         t0 = time.monotonic()
 
         try:
-            summary = run_one(config_path, progress=args.progress)
+            summary = run_one(config_path, sweep_dir, progress=args.progress)
             elapsed = time.monotonic() - t0
 
             req = summary.get("requests", {})
@@ -111,8 +119,8 @@ def main():
             print(f"  FAILED in {elapsed:.1f}s: {e}")
             results[name] = {"error": str(e)}
 
-    # Save combined results
-    output_path = os.path.join(args.exp_dir, "results.json")
+    # Save combined results in sweep directory
+    output_path = os.path.join(sweep_dir, "results.json")
     with open(output_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nAll results saved to {output_path}")
