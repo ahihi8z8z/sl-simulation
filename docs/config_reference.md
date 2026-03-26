@@ -24,6 +24,49 @@ File JSON chính điều khiển toàn bộ simulation. 3 section bắt buộc: 
 | `export_mode` | int | không | 0 | 0: summary, 1: +metrics CSV, 2: +request trace CSV |
 | `drain_timeout` | float | không | 30.0 | Thời gian chờ in-flight requests hoàn thành sau duration |
 
+### workload (tùy chọn)
+
+Cấu hình nguồn tạo request. Mặc định dùng Poisson generator.
+
+```json
+{
+  "workload": {
+    "generator": "aggregate_trace",
+    "trace_path": "datasets/traffic_pattern/Java_APIG-S.csv",
+    "scale": 2.0
+  }
+}
+```
+
+| Key | Type | Mặc định | Mô tả |
+|-----|------|----------|-------|
+| `generator` | str | `"poisson"` | Loại generator: `"poisson"`, `"trace"`, `"aggregate_trace"` |
+| `trace_path` | str | — | Đường dẫn CSV trace (bắt buộc khi generator = trace hoặc aggregate_trace) |
+| `scale` | float | 1.0 | Hệ số nhân số request (chỉ cho aggregate_trace). Ví dụ `2.0` = gấp đôi traffic |
+
+**3 loại generator:**
+
+| Generator | CSV format | Mô tả |
+|-----------|-----------|-------|
+| `poisson` | Không cần CSV | Sinh request theo phân phối Poisson với `arrival_rate` từ service config |
+| `trace` | `timestamp,function_id,duration,memory` | Replay từng request theo timestamp chính xác |
+| `aggregate_trace` | `minute,function_id,count,duration` | Đọc số request/phút, chia đều trong phút (interval = 60/count). Hỗ trợ `scale` |
+
+**Ví dụ aggregate_trace CSV:**
+
+```csv
+minute,function_id,count,duration
+0,svc-api,5,0.15
+1,svc-api,10,0.15
+1,svc-worker,3,2.0
+```
+
+Với `scale: 2.0`, minute 1 sẽ có 20 requests cho svc-api (thay vì 10) và 6 cho svc-worker (thay vì 3).
+
+Khi dùng `trace` hoặc `aggregate_trace` với cột `duration`, nên set `serving_model: "precomputed"` trong cluster config để dùng duration từ trace thay vì `job_size * processing_factor`.
+
+---
+
 ### services (bắt buộc, non-empty list)
 
 ```json
@@ -330,7 +373,8 @@ null --0.5s--> prewarm --0.3s--> warm
 |------|-------|
 | `configs/simulation/sample_minimal.json` | 1 service, 1 node, autoscaling on, 60s |
 | `configs/simulation/sample_full.json` | 3 services (basic + extended chain + transition_profile CSV), 2 nodes, controller, autoscaling_defaults |
-| `configs/simulation/sample_trace_replay.json` | Trace-driven workload (CSV trace), precomputed serving model |
+| `configs/simulation/sample_trace_replay.json` | Trace-driven workload (per-request CSV trace), precomputed serving model |
+| `configs/simulation/sample_aggregate_trace_replay.json` | Aggregate trace (count/minute), scale=2.0, precomputed serving model, 2 nodes |
 | `configs/gym/sample_gym_discrete.json` | Gym env với 5s step, max 50 steps |
 | `configs/rl/sample_ppo_train.json` | PPO training 1000 timesteps, 2 envs |
 | `configs/rl/sample_ppo_infer.json` | Inference 2 episodes |
