@@ -218,3 +218,4 @@ __marimo__/
 logs/
 *.png
 *.csv
+experimental/
