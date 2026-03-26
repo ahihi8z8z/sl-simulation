@@ -1,5 +1,6 @@
 """Unit tests for drain period and truncated request handling."""
 
+import json
 import logging
 import os
 import tempfile
@@ -280,8 +281,8 @@ class TestSummaryTruncated:
         engine.run()
         engine.shutdown()
 
-        summary_path = os.path.join(run_dir, "summary.txt")
+        summary_path = os.path.join(run_dir, "summary.json")
         assert os.path.exists(summary_path)
         with open(summary_path) as f:
-            content = f.read()
-        assert "Truncated:" in content
+            summary = json.load(f)
+        assert summary["requests"]["truncated"] > 0

@@ -128,7 +128,7 @@ class TestSimulationEngine:
         engine.run()
         engine.shutdown()
 
-        assert os.path.exists(os.path.join(run_dir, "summary.txt"))
+        assert os.path.exists(os.path.join(run_dir, "summary.json"))
 
     def test_full_run_with_export_mode_2(self):
         run_dir = tempfile.mkdtemp(prefix="test_engine_")
@@ -140,7 +140,7 @@ class TestSimulationEngine:
         engine.run()
         engine.shutdown()
 
-        assert os.path.exists(os.path.join(run_dir, "summary.txt"))
+        assert os.path.exists(os.path.join(run_dir, "summary.json"))
         assert os.path.exists(os.path.join(run_dir, "system_metrics.csv"))
         assert os.path.exists(os.path.join(run_dir, "request_trace.csv"))
 

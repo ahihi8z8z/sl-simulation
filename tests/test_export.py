@@ -1,6 +1,7 @@
 """Unit tests for Step 8: Export (3 modes)."""
 
 import csv
+import json
 import os
 import tempfile
 
@@ -90,24 +91,24 @@ class TestExportMode0:
     def test_only_summary(self):
         ctx, run_dir, paths = _run_sim(0)
         assert len(paths) == 1
-        assert os.path.exists(os.path.join(run_dir, "summary.txt"))
+        assert os.path.exists(os.path.join(run_dir, "summary.json"))
         assert not os.path.exists(os.path.join(run_dir, "system_metrics.csv"))
         assert not os.path.exists(os.path.join(run_dir, "request_trace.csv"))
 
     def test_summary_content(self):
         ctx, run_dir, _ = _run_sim(0)
-        with open(os.path.join(run_dir, "summary.txt")) as f:
-            content = f.read()
-        assert "Simulation Summary" in content
-        assert "Total requests:" in content
-        assert "Completed:" in content
+        with open(os.path.join(run_dir, "summary.json")) as f:
+            summary = json.load(f)
+        assert "simulation" in summary
+        assert "requests" in summary
+        assert summary["requests"]["total"] > 0
 
 
 class TestExportMode1:
     def test_summary_and_metrics(self):
         ctx, run_dir, paths = _run_sim(1)
         assert len(paths) == 2
-        assert os.path.exists(os.path.join(run_dir, "summary.txt"))
+        assert os.path.exists(os.path.join(run_dir, "summary.json"))
         assert os.path.exists(os.path.join(run_dir, "system_metrics.csv"))
         assert not os.path.exists(os.path.join(run_dir, "request_trace.csv"))
 
@@ -126,7 +127,7 @@ class TestExportMode2:
     def test_all_files(self):
         ctx, run_dir, paths = _run_sim(2)
         assert len(paths) == 3
-        assert os.path.exists(os.path.join(run_dir, "summary.txt"))
+        assert os.path.exists(os.path.join(run_dir, "summary.json"))
         assert os.path.exists(os.path.join(run_dir, "system_metrics.csv"))
         assert os.path.exists(os.path.join(run_dir, "request_trace.csv"))
 

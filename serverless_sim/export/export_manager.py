@@ -14,9 +14,9 @@ if TYPE_CHECKING:
 class ExportManager:
     """Manages export mode (0/1/2) and coordinates exporters.
 
-    Mode 0: summary.txt only
-    Mode 1: summary.txt + system_metrics.csv
-    Mode 2: summary.txt + system_metrics.csv + request_trace.csv (streamed)
+    Mode 0: summary.json only
+    Mode 1: summary.json + system_metrics.csv
+    Mode 2: summary.json + system_metrics.csv + request_trace.csv (streamed)
     """
 
     def __init__(self, ctx: SimContext, mode: int = 0):
