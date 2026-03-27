@@ -100,9 +100,14 @@ class LifecycleCollector(BaseCollector):
                 if inst.state == "running":
                     svc_counts["running"] += 1
 
+        lm = ctx.lifecycle_manager
         metrics: dict[str, float] = {
             "lifecycle.instances_total": total_instances,
-            "lifecycle.instances_evicted": ctx.lifecycle_manager._evicted_count,
+            "lifecycle.instances_evicted": lm._evicted_count,
+            "lifecycle.total_cpu_seconds": lm.total_cpu_seconds,
+            "lifecycle.total_memory_seconds": lm.total_memory_seconds,
+            "lifecycle.running_cpu_seconds": lm.running_cpu_seconds,
+            "lifecycle.running_memory_seconds": lm.running_memory_seconds,
         }
 
         # Per-state counts (all states, including extended)
