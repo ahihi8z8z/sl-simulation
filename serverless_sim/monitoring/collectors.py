@@ -116,6 +116,30 @@ class LifecycleCollector(BaseCollector):
         return metrics
 
 
+class InterArrivalCollector(BaseCollector):
+    """Collects per-service inter-arrival time and last cold-start flag.
+
+    Metrics exposed:
+        request.<svc>.inter_arrival_time  – seconds since previous invocation
+        request.<svc>.last_cold_start     – 1.0 if last completed request was cold, else 0.0
+    """
+
+    def collect(self, env_time: float, ctx: SimContext) -> dict[str, float]:
+        store = ctx.request_table
+        metrics: dict[str, float] = {}
+
+        for svc_id in ctx.workload_manager.services:
+            iat = store._inter_arrival.get(svc_id)
+            if iat is not None:
+                metrics[f"request.{svc_id}.inter_arrival_time"] = iat
+
+            cold = store._last_cold_start.get(svc_id)
+            if cold is not None:
+                metrics[f"request.{svc_id}.last_cold_start"] = 1.0 if cold else 0.0
+
+        return metrics
+
+
 class AutoscalingCollector(BaseCollector):
     """Collects autoscaling parameter metrics."""
 

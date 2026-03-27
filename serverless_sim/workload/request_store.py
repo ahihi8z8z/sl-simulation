@@ -50,6 +50,12 @@ class RequestStore:
         self._latency_sum: float = 0.0
         self._trace_writer: BatchCSVWriter | None = None
 
+        # Per-service inter-arrival tracking
+        self._last_arrival: dict[str, float] = {}
+        self._inter_arrival: dict[str, float] = {}
+        # Per-service last cold-start flag (True/False for most recent completed request)
+        self._last_cold_start: dict[str, bool] = {}
+
     # ------------------------------------------------------------------
     # Trace writer lifecycle
     # ------------------------------------------------------------------
@@ -75,6 +81,13 @@ class RequestStore:
         self._active[inv.request_id] = inv
         self.counters.total += 1
 
+        # Update inter-arrival time for the service
+        svc = inv.service_id
+        prev = self._last_arrival.get(svc)
+        if prev is not None:
+            self._inter_arrival[svc] = inv.arrival_time - prev
+        self._last_arrival[svc] = inv.arrival_time
+
     def finalize(self, inv: Invocation) -> None:
         """Record terminal state, stream to CSV, remove from memory."""
         status = inv.status
@@ -82,6 +95,7 @@ class RequestStore:
             self.counters.completed += 1
             if inv.cold_start:
                 self.counters.cold_starts += 1
+            self._last_cold_start[inv.service_id] = inv.cold_start
             if inv.completion_time is not None and inv.arrival_time is not None:
                 self._latency_sum += inv.completion_time - inv.arrival_time
         elif status == "dropped":

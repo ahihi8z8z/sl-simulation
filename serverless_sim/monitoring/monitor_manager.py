@@ -7,6 +7,7 @@ from serverless_sim.monitoring.collectors import (
     RequestCollector,
     ClusterCollector,
     LifecycleCollector,
+    InterArrivalCollector,
     AutoscalingCollector,
 )
 
@@ -25,6 +26,7 @@ class MonitorManager:
             RequestCollector(),
             ClusterCollector(),
             LifecycleCollector(),
+            InterArrivalCollector(),
             AutoscalingCollector(),
         ]
 
