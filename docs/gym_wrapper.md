@@ -121,7 +121,7 @@ Hiện tại no-op. Simulation tự động giải phóng khi GC.
 
 ```python
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-from serverless_sim.rl_agent.train import make_env
+from rl_agent.train import make_env
 
 # DummyVecEnv — chạy trong cùng process
 env = DummyVecEnv([make_env(sim_cfg, gym_cfg, seed=i) for i in range(4)])

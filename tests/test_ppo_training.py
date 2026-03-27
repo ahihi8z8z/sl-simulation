@@ -6,7 +6,7 @@ import tempfile
 
 import pytest
 
-from serverless_sim.rl_agent.train import make_env, run_training
+from rl_agent.train import make_env, run_training
 
 
 # Paths to sample configs

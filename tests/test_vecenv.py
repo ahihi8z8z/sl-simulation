@@ -2,7 +2,7 @@
 
 import numpy as np
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-from serverless_sim.gym_env.serverless_gym_env import ServerlessGymEnv
+from gym_env.serverless_gym_env import ServerlessGymEnv
 
 
 SIM_CONFIG = "configs/simulation/sample_minimal.json"

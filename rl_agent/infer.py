@@ -7,7 +7,7 @@ import os
 
 from stable_baselines3 import PPO
 
-from serverless_sim.gym_env.serverless_gym_env import ServerlessGymEnv
+from gym_env.serverless_gym_env import ServerlessGymEnv
 
 
 def run_inference(

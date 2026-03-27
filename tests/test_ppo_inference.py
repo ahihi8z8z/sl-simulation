@@ -6,8 +6,8 @@ import tempfile
 
 import pytest
 
-from serverless_sim.rl_agent.train import run_training
-from serverless_sim.rl_agent.infer import run_inference
+from rl_agent.train import run_training
+from rl_agent.infer import run_inference
 
 
 CONFIGS_DIR = os.path.join(os.path.dirname(__file__), "..", "configs")

@@ -47,7 +47,7 @@ def run_simulate(args):
 
 
 def run_train(args):
-    from serverless_sim.rl_agent.train import run_training
+    from rl_agent.train import run_training
 
     run_dir = _create_run_dir(run_name=getattr(args, "run_name", None) or "train")
     run_training(
@@ -60,7 +60,7 @@ def run_train(args):
 
 
 def run_infer(args):
-    from serverless_sim.rl_agent.infer import run_inference
+    from rl_agent.infer import run_inference
 
     run_dir = _create_run_dir(run_name=getattr(args, "run_name", None) or "infer")
     run_inference(

@@ -12,9 +12,9 @@ from serverless_sim.core.simulation.sim_builder import SimulationBuilder
 from serverless_sim.core.simulation.sim_engine import SimulationEngine
 from serverless_sim.autoscaling.autoscaling_api import AutoscalingAPI
 from serverless_sim.monitoring.monitor_api import MonitorAPI
-from serverless_sim.gym_env.observation_builder import ObservationBuilder
-from serverless_sim.gym_env.action_mapper import ActionMapper
-from serverless_sim.gym_env.reward_calculator import RewardCalculator
+from gym_env.observation_builder import ObservationBuilder
+from gym_env.action_mapper import ActionMapper
+from gym_env.reward_calculator import RewardCalculator
 
 
 class ServerlessGymEnv(gym.Env):

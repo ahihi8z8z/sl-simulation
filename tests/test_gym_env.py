@@ -1,7 +1,7 @@
 """Unit tests for Step 14: Gymnasium wrapper."""
 
 import numpy as np
-from serverless_sim.gym_env.serverless_gym_env import ServerlessGymEnv
+from gym_env.serverless_gym_env import ServerlessGymEnv
 
 
 SIM_CONFIG = "configs/simulation/sample_minimal.json"

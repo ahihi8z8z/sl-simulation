@@ -8,7 +8,7 @@ import os
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-from serverless_sim.gym_env.serverless_gym_env import ServerlessGymEnv
+from gym_env.serverless_gym_env import ServerlessGymEnv
 
 
 def make_env(sim_config_path: str, gym_config_path: str, seed: int):
