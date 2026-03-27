@@ -283,8 +283,8 @@ class TestMinInstances:
 
 class TestMaxInstances:
     def test_max_instances_blocks_cold_start(self):
-        """max_instances=2, 2 instances exist, new request -> drop 'max_instances'."""
-        config = _make_config(max_instances=2, min_instances=2, arrival_rate=0.0)
+        """max_instances=2, 2 instances exist (each fully occupied), new request -> drop 'max_instances'."""
+        config = _make_config(max_instances=2, min_instances=2, arrival_rate=0.0, max_concurrency=1)
         ctx = _make_ctx(config)
         autoscaler = _setup_autoscaler(ctx)
 
@@ -301,18 +301,18 @@ class TestMaxInstances:
         assert len(warm) >= 2
 
         # Now send a request that would need a new instance
-        # First use the 2 warm instances
+        # First use the 2 warm instances with long jobs to keep them occupied
         node = ctx.cluster_manager.get_node("node-0")
         for inst in warm:
             inv = Invocation(
                 request_id=f"use-{inst.instance_id}",
                 service_id="svc-a",
                 arrival_time=ctx.env.now,
-                job_size=0.1,
+                job_size=100.0,  # long job: instance stays running
             )
             ctx.lifecycle_manager.start_execution(inst, inv)
 
-        # Now all instances are running, send another request via the node
+        # Now all instances are running (fully occupied, max_concurrency=1), send another request
         inv_drop = Invocation(
             request_id="r-drop",
             service_id="svc-a",
@@ -351,8 +351,8 @@ class TestMaxInstances:
         assert len(dropped) == 0
 
     def test_max_instances_counts_all_states(self):
-        """max_instances=3 with 3 instances (all running) -> next request dropped."""
-        config = _make_config(max_instances=3, min_instances=3, arrival_rate=0.0)
+        """max_instances=3 with 3 instances (all running, fully occupied) -> next request dropped."""
+        config = _make_config(max_instances=3, min_instances=3, arrival_rate=0.0, max_concurrency=1)
         ctx = _make_ctx(config)
         autoscaler = _setup_autoscaler(ctx)
 
@@ -365,7 +365,7 @@ class TestMaxInstances:
         total = autoscaler._count_total_instances("svc-a")
         assert total >= 3, f"Expected >= 3 total instances, got {total}"
 
-        # Make all instances running
+        # Make all instances running with long jobs (max_concurrency=1, so fully occupied)
         node = ctx.cluster_manager.get_node("node-0")
         warm = [
             i for i in ctx.lifecycle_manager.get_instances_for_node("node-0")
@@ -376,11 +376,11 @@ class TestMaxInstances:
                 request_id=f"use-{inst.instance_id}",
                 service_id="svc-a",
                 arrival_time=ctx.env.now,
-                job_size=0.1,
+                job_size=100.0,  # long job: instance stays running
             )
             ctx.lifecycle_manager.start_execution(inst, inv)
 
-        # Send a new request - all 3 running, no promotable, would need cold start
+        # Send a new request - all 3 running (fully occupied), would need cold start
         # but total=3 >= max=3 so should be dropped
         inv_drop = Invocation(
             request_id="r-over-max",
@@ -444,8 +444,8 @@ class TestMaxInstances:
         assert inv_ok.drop_reason != "max_instances"
 
     def test_max_instances_drop_reason(self):
-        """Dropped request has drop_reason='max_instances'."""
-        config = _make_config(max_instances=1, min_instances=1, arrival_rate=0.0)
+        """Dropped request has drop_reason='max_instances' (instance fully occupied)."""
+        config = _make_config(max_instances=1, min_instances=1, arrival_rate=0.0, max_concurrency=1)
         ctx = _make_ctx(config)
         autoscaler = _setup_autoscaler(ctx)
 
@@ -466,7 +466,7 @@ class TestMaxInstances:
             request_id="use-1",
             service_id="svc-a",
             arrival_time=ctx.env.now,
-            job_size=0.1,
+            job_size=100.0,  # long job: instance stays running (max_concurrency=1, fully occupied)
         )
         ctx.lifecycle_manager.start_execution(inst, inv)
 

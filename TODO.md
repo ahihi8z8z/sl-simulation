@@ -2,7 +2,7 @@
 
 ## Bugs / Logic issues
 
-- [ ] `find_reusable_instance()` chỉ tìm instance ở state `warm`, bỏ qua instance `running` còn slot. Khi `max_concurrency > 1`, request mới sẽ cold start thay vì dùng instance running còn slot trống. Fix: tìm cả `running` instances có `available_slots > 0`.
+- [x] `find_reusable_instance()` now also returns running instances with free concurrency slots (warm still preferred).
 
 ## Features
 

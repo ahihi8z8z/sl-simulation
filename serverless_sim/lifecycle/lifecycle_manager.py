@@ -64,15 +64,26 @@ class LifecycleManager:
     # ------------------------------------------------------------------
 
     def find_reusable_instance(self, node: Node, service_id: str) -> ContainerInstance | None:
-        """Find a warm instance for this service with available slots."""
+        """Find a reusable instance for this service with available slots.
+
+        Prefers warm instances (no transition cost) but also considers running
+        instances that still have free concurrency slots (max_concurrency > 1).
+        """
+        running_candidate: ContainerInstance | None = None
         for inst in self._get_instances(node.node_id):
-            if (
-                inst.service_id == service_id
-                and inst.state == "warm"
-                and inst.available_slots > 0
-            ):
+            if inst.service_id != service_id:
+                continue
+            # Use active_requests (updated by start/finish_execution) to check
+            # available concurrency; available_slots uses the SimPy resource count
+            # which is only valid inside the node's async dispatch flow.
+            has_free_slot = inst.active_requests < inst.max_concurrency
+            if not has_free_slot:
+                continue
+            if inst.state == "warm":
                 return inst
-        return None
+            if inst.state == "running" and running_candidate is None:
+                running_candidate = inst
+        return running_candidate
 
     def find_promotable_instance(self, node: Node, service_id: str) -> ContainerInstance | None:
         """Find the deepest intermediate instance that can be promoted to warm."""
