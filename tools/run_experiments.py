@@ -116,6 +116,51 @@ def _format_result(name: str, summary: dict, elapsed: float) -> str:
     )
 
 
+def _save_results_csv(results: dict, path: str) -> None:
+    """Save results as CSV."""
+    import csv
+    header = [
+        "experiment", "total", "completed", "dropped", "truncated", "cold_starts",
+        "throughput", "drop_rate_pct", "cold_start_rate_pct", "latency_mean",
+        "cpu_effective_ratio", "memory_effective_ratio",
+        "total_cpu_seconds", "running_cpu_seconds",
+        "total_memory_seconds", "running_memory_seconds",
+        "wall_clock_seconds", "error",
+    ]
+    with open(path, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=header)
+        writer.writeheader()
+        for name, summary in results.items():
+            if "error" in summary:
+                writer.writerow({"experiment": name, "error": summary["error"]})
+                continue
+            req = summary.get("requests", {})
+            rates = summary.get("rates", {})
+            lat = summary.get("latency", {})
+            ratio = summary.get("effective_resource_ratio", {})
+            sim = summary.get("simulation", {})
+            writer.writerow({
+                "experiment": name,
+                "total": req.get("total", 0),
+                "completed": req.get("completed", 0),
+                "dropped": req.get("dropped", 0),
+                "truncated": req.get("truncated", 0),
+                "cold_starts": req.get("cold_starts", 0),
+                "throughput": rates.get("throughput_req_per_s", ""),
+                "drop_rate_pct": rates.get("drop_rate_pct", ""),
+                "cold_start_rate_pct": rates.get("cold_start_rate_pct", ""),
+                "latency_mean": lat.get("mean", ""),
+                "cpu_effective_ratio": ratio.get("cpu_effective_ratio", ""),
+                "memory_effective_ratio": ratio.get("memory_effective_ratio", ""),
+                "total_cpu_seconds": ratio.get("total_cpu_seconds", ""),
+                "running_cpu_seconds": ratio.get("running_cpu_seconds", ""),
+                "total_memory_seconds": ratio.get("total_memory_seconds", ""),
+                "running_memory_seconds": ratio.get("running_memory_seconds", ""),
+                "wall_clock_seconds": sim.get("wall_clock_seconds", ""),
+                "error": "",
+            })
+
+
 def _print_table(results: dict) -> None:
     """Print summary table."""
     print(f"\n{'='*90}")
@@ -165,7 +210,7 @@ def main():
     configs = sorted(glob.glob(os.path.join(args.exp_dir, "*.json")))
     if args.filter:
         configs = [c for c in configs if args.filter in os.path.basename(c)]
-    configs = [c for c in configs if os.path.basename(c) != "results.json"]
+    configs = [c for c in configs if os.path.basename(c) not in ("results.json", "results.csv")]
 
     if not configs:
         print(f"No JSON configs found in {args.exp_dir}")
@@ -191,16 +236,30 @@ def main():
     t_total = time.monotonic()
 
     if n_workers > 1:
-        # Parallel execution
+        # Parallel execution with progress bar
+        try:
+            from tqdm import tqdm
+            use_tqdm = True
+        except ImportError:
+            use_tqdm = False
+
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             futures = {
                 executor.submit(_run_worker, cfg, sweep_dir): cfg
                 for cfg in configs
             }
+            if use_tqdm:
+                pbar = tqdm(total=len(configs), desc="Sweep", unit="exp")
             for future in as_completed(futures):
                 name, summary, elapsed = future.result()
                 results[name] = summary
-                print(_format_result(name, summary, elapsed))
+                if use_tqdm:
+                    pbar.update(1)
+                    pbar.set_postfix_str(f"{name} ({elapsed:.0f}s)", refresh=False)
+                else:
+                    print(_format_result(name, summary, elapsed))
+            if use_tqdm:
+                pbar.close()
     else:
         # Sequential execution
         for i, config_path in enumerate(configs, 1):
@@ -220,10 +279,9 @@ def main():
 
     total_elapsed = time.monotonic() - t_total
 
-    # Save combined results
-    output_path = os.path.join(sweep_dir, "results.json")
-    with open(output_path, "w") as f:
-        json.dump(results, f, indent=2)
+    # Save combined results as CSV
+    output_path = os.path.join(sweep_dir, "results.csv")
+    _save_results_csv(results, output_path)
     print(f"\nAll results saved to {output_path}")
     print(f"Total time: {total_elapsed:.1f}s")
 
