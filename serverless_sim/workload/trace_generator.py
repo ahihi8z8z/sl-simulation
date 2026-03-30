@@ -37,6 +37,20 @@ if TYPE_CHECKING:
 
 MAX_TRACE_SIZE_MB = 500
 
+# Default column names expected in CSVs
+DEFAULT_TRACE_COLUMNS = {
+    "timestamp": "timestamp",
+    "function_id": "function_id",
+    "duration": "duration",
+    "memory": "memory",
+}
+DEFAULT_AGGREGATE_COLUMNS = {
+    "minute": "minute",
+    "function_id": "function_id",
+    "count": "count",
+    "duration": "duration",
+}
+
 
 @dataclass
 class TraceRecord:
@@ -62,11 +76,13 @@ class TraceReplayGenerator(BaseGenerator):
     """
 
     def __init__(self, trace_path: str, start_minute: float | None = None,
-                 end_minute: float | None = None):
+                 end_minute: float | None = None,
+                 column_map: dict[str, str] | None = None):
         self.ctx: SimContext | None = None
         self._request_counter = 0
         self._start_minute = start_minute
         self._end_minute = end_minute
+        self._col = {**DEFAULT_TRACE_COLUMNS, **(column_map or {})}
         self._records: list[TraceRecord] = []
         self._load_trace(trace_path)
 
@@ -80,14 +96,17 @@ class TraceReplayGenerator(BaseGenerator):
                 stacklevel=2,
             )
 
+        c = self._col
         with open(path, "r") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                dur_col = c["duration"]
+                mem_col = c["memory"]
                 record = TraceRecord(
-                    timestamp=float(row["timestamp"]),
-                    function_id=row["function_id"],
-                    duration=float(row["duration"]) if "duration" in row and row["duration"] else None,
-                    memory=float(row["memory"]) if "memory" in row and row["memory"] else None,
+                    timestamp=float(row[c["timestamp"]]),
+                    function_id=row[c["function_id"]],
+                    duration=float(row[dur_col]) if dur_col in row and row[dur_col] else None,
+                    memory=float(row[mem_col]) if mem_col in row and row[mem_col] else None,
                 )
                 self._records.append(record)
 
@@ -236,12 +255,14 @@ class AggregateTraceGenerator(BaseGenerator):
     MINUTE_SECONDS = 60.0
 
     def __init__(self, trace_path: str, scale: float = 1.0,
-                 start_minute: int | None = None, end_minute: int | None = None):
+                 start_minute: int | None = None, end_minute: int | None = None,
+                 column_map: dict[str, str] | None = None):
         self.ctx: SimContext | None = None
         self._request_counter = 0
         self._scale = scale
         self._start_minute = start_minute
         self._end_minute = end_minute
+        self._col = {**DEFAULT_AGGREGATE_COLUMNS, **(column_map or {})}
         self._records: list[AggregateRecord] = []
         self._load_trace(trace_path)
 
@@ -255,14 +276,22 @@ class AggregateTraceGenerator(BaseGenerator):
                 stacklevel=2,
             )
 
+        c = self._col
         with open(path, "r") as f:
             reader = csv.DictReader(f)
             for row in reader:
+                dur_col = c["duration"]
+                count_raw = row[c["count"]]
+                if not count_raw or count_raw == "":
+                    continue
+                count_val = round(float(count_raw))
+                if count_val <= 0:
+                    continue
                 record = AggregateRecord(
-                    minute=int(row["minute"]),
-                    function_id=row["function_id"],
-                    count=int(row["count"]),
-                    duration=float(row["duration"]) if "duration" in row and row["duration"] else None,
+                    minute=int(float(row[c["minute"]])),
+                    function_id=row[c["function_id"]],
+                    count=count_val,
+                    duration=float(row[dur_col]) if dur_col in row and row[dur_col] else None,
                 )
                 if record.count > 0:
                     self._records.append(record)

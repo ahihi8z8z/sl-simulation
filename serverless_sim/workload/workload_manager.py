@@ -48,20 +48,23 @@ class WorkloadManager:
 
         start_minute = workload_cfg.get("start_minute", None)
         end_minute = workload_cfg.get("end_minute", None)
+        column_map = workload_cfg.get("column_map", None)
 
         generator: BaseGenerator
         if gen_type == "trace":
             from serverless_sim.workload.trace_generator import TraceReplayGenerator
             trace_path = workload_cfg["trace_path"]
             generator = TraceReplayGenerator(trace_path, start_minute=start_minute,
-                                             end_minute=end_minute)
+                                             end_minute=end_minute,
+                                             column_map=column_map)
         elif gen_type == "aggregate_trace":
             from serverless_sim.workload.trace_generator import AggregateTraceGenerator
             trace_path = workload_cfg["trace_path"]
             scale = workload_cfg.get("scale", 1.0)
             generator = AggregateTraceGenerator(trace_path, scale=scale,
                                                 start_minute=start_minute,
-                                                end_minute=end_minute)
+                                                end_minute=end_minute,
+                                                column_map=column_map)
         else:
             generator = PoissonFixedSizeGenerator()
 
