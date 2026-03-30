@@ -5,7 +5,6 @@ import os
 from typing import TYPE_CHECKING
 
 from serverless_sim.export.summary_writer import SummaryWriter
-from serverless_sim.export.system_metrics_exporter import SystemMetricsExporter
 
 if TYPE_CHECKING:
     from serverless_sim.core.simulation.sim_context import SimContext
@@ -23,6 +22,10 @@ class ExportManager:
         self.ctx = ctx
         self.mode = mode
         self.logger = ctx.logger
+
+        # Mode 1+: enable streaming system metrics
+        if self.mode >= 1:
+            ctx.monitor_manager.enable_streaming(ctx.run_dir)
 
         # Mode 2: enable streaming trace on the request store
         if self.mode >= 2:
@@ -47,10 +50,11 @@ class ExportManager:
         self.logger.info("Wrote %s", p)
 
         if self.mode >= 1:
-            sme = SystemMetricsExporter(self.ctx)
-            p = sme.export()
-            if p:
-                paths.append(p)
-                self.logger.info("Wrote %s", p)
+            # Close streaming writer (flushes remaining buffer)
+            self.ctx.monitor_manager.close_streaming()
+            metrics_path = os.path.join(self.ctx.run_dir, "system_metrics.csv")
+            if os.path.exists(metrics_path):
+                paths.append(metrics_path)
+                self.logger.info("Wrote %s", metrics_path)
 
         return paths
