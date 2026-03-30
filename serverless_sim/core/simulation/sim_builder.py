@@ -75,11 +75,22 @@ class SimulationBuilder:
         # Controller
         ctrl_cfg = config.get("controller", {})
         if ctrl_cfg.get("enabled", False) and ctx.autoscaling_manager is not None:
-            policy = ThresholdPolicy(
-                cpu_high=ctrl_cfg.get("cpu_high", 0.8),
-                cpu_low=ctrl_cfg.get("cpu_low", 0.3),
-                prewarm_max=ctrl_cfg.get("prewarm_max", 10),
-            )
+            policy_type = ctrl_cfg.get("policy", "threshold")
+
+            if policy_type == "predictive":
+                from serverless_sim.controller.policies.predictive_policy import PredictivePolicy
+                policy = PredictivePolicy(
+                    predict_path=ctrl_cfg["predict_path"],
+                    predict_column=ctrl_cfg.get("predict_column", "predicted_count"),
+                    predict_scale=ctrl_cfg.get("predict_scale", 1.0),
+                )
+            else:
+                policy = ThresholdPolicy(
+                    cpu_high=ctrl_cfg.get("cpu_high", 0.8),
+                    cpu_low=ctrl_cfg.get("cpu_low", 0.3),
+                    prewarm_max=ctrl_cfg.get("prewarm_max", 10),
+                )
+
             ctx.controller = BaseController(
                 ctx,
                 policy=policy,

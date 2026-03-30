@@ -22,7 +22,7 @@ def build_parser() -> argparse.ArgumentParser:
     # train
     train_parser = subparsers.add_parser("train", help="Train PPO agent")
     train_parser.add_argument("--sim-config", required=True, help="Path to simulation config JSON")
-    train_parser.add_argument("--gym-config", required=True, help="Path to gym config JSON")
+    train_parser.add_argument("--gym-config", default=None, help="Path to gym config JSON (optional)")
     train_parser.add_argument("--rl-config", required=True, help="Path to RL config JSON")
     train_parser.add_argument("--log-mode", choices=["console", "file", "both"], default="console")
     train_parser.add_argument("--log-level", default="INFO")
@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     # infer
     infer_parser = subparsers.add_parser("infer", help="Run RL inference")
     infer_parser.add_argument("--sim-config", required=True, help="Path to simulation config JSON")
-    infer_parser.add_argument("--gym-config", required=True, help="Path to gym config JSON")
+    infer_parser.add_argument("--gym-config", default=None, help="Path to gym config JSON (optional)")
     infer_parser.add_argument("--rl-config", required=True, help="Path to RL config JSON")
     infer_parser.add_argument("--log-mode", choices=["console", "file", "both"], default="console")
     infer_parser.add_argument("--log-level", default="INFO")

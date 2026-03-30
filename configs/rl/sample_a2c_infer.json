@@ -1,0 +1,9 @@
+{
+    "algorithm": "a2c",
+    "env": "vahidinia",
+    "model_path": "logs/run_train/a2c_vahidinia",
+    "n_episodes": 3,
+    "seed": 42,
+    "deterministic": true,
+    "device": "cpu"
+}

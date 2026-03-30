@@ -1,20 +1,30 @@
-"""PPO training entry point."""
+"""RL training entry point — supports PPO (discrete) and A2C (continuous)."""
 
 from __future__ import annotations
 
 import json
 import os
 
-from stable_baselines3 import PPO
+from stable_baselines3 import PPO, A2C
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
-from gym_env.serverless_gym_env import ServerlessGymEnv
+
+
+ALGORITHMS = {"ppo": PPO, "a2c": A2C}
+
+
+def _make_env(env_class, sim_config_path: str, gym_config_path: str, seed: int):
+    def _init():
+        env = env_class(sim_config_path, gym_config_path, seed=seed)
+        return Monitor(env)
+    return _init
 
 
 def make_env(sim_config_path: str, gym_config_path: str, seed: int):
-    def _init():
-        return ServerlessGymEnv(sim_config_path, gym_config_path, seed=seed)
-    return _init
+    """Backward-compatible: creates ServerlessGymEnv."""
+    from gym_env.serverless_gym_env import ServerlessGymEnv
+    return _make_env(ServerlessGymEnv, sim_config_path, gym_config_path, seed)
 
 
 def run_training(
@@ -23,44 +33,77 @@ def run_training(
     rl_config_path: str,
     run_dir: str = "logs",
 ) -> str:
-    """Train a PPO model and save it.
+    """Train an RL model and save it.
 
     Returns the path to the saved model.
     """
     with open(rl_config_path, "r") as f:
         rl_config = json.load(f)
 
+    algo_name = rl_config.get("algorithm", "ppo").lower()
+    env_type = rl_config.get("env", "discrete")
     n_envs = rl_config.get("n_envs", 4)
     total_timesteps = rl_config.get("total_timesteps", 10000)
     use_subproc = rl_config.get("use_subproc", False)
-    learning_rate = rl_config.get("learning_rate", 3e-4)
-    n_steps = rl_config.get("n_steps", 128)
-    batch_size = rl_config.get("batch_size", 64)
-    n_epochs = rl_config.get("n_epochs", 10)
-    gamma = rl_config.get("gamma", 0.99)
-    model_name = rl_config.get("model_name", "ppo_serverless")
+    model_name = rl_config.get("model_name", "rl_serverless")
+    policy_kwargs = rl_config.get("policy_kwargs", None)
+
+    # Select env class
+    if env_type == "vahidinia":
+        from gym_env.vahidinia_env import VahidiniaEnv
+        env_class = VahidiniaEnv
+    else:
+        from gym_env.serverless_gym_env import ServerlessGymEnv
+        env_class = ServerlessGymEnv
+
+    # Select algorithm
+    algo_cls = ALGORITHMS.get(algo_name)
+    if algo_cls is None:
+        raise ValueError(f"Unknown algorithm '{algo_name}'. Choose from: {list(ALGORITHMS.keys())}")
 
     # Create vectorized environments
-    env_fns = [make_env(sim_config_path, gym_config_path, seed=i) for i in range(n_envs)]
+    env_fns = [_make_env(env_class, sim_config_path, gym_config_path, seed=i) for i in range(n_envs)]
     if use_subproc and n_envs > 1:
         vec_env = SubprocVecEnv(env_fns)
     else:
         vec_env = DummyVecEnv(env_fns)
 
-    # Create PPO model
-    model = PPO(
-        "MlpPolicy",
-        vec_env,
-        learning_rate=learning_rate,
-        n_steps=n_steps,
-        batch_size=batch_size,
-        n_epochs=n_epochs,
-        gamma=gamma,
+    # Common SB3 params
+    model_kwargs = dict(
+        policy="MlpPolicy",
+        env=vec_env,
+        learning_rate=rl_config.get("learning_rate", 3e-4),
+        n_steps=rl_config.get("n_steps", 128),
+        gamma=rl_config.get("gamma", 0.99),
+        gae_lambda=rl_config.get("gae_lambda", 0.95),
+        ent_coef=rl_config.get("ent_coef", 0.0),
+        vf_coef=rl_config.get("vf_coef", 0.5),
+        normalize_advantage=rl_config.get("normalize_advantages", True),
+        device=rl_config.get("device", "auto"),
         verbose=1,
     )
 
+    # Tensorboard logging
+    tb_log = rl_config.get("tensorboard_log", None)
+    if tb_log:
+        model_kwargs["tensorboard_log"] = tb_log
+
+    # Policy kwargs (net_arch, activation_fn, etc.)
+    if policy_kwargs:
+        model_kwargs["policy_kwargs"] = policy_kwargs
+
+    # PPO-specific params
+    if algo_name == "ppo":
+        model_kwargs["batch_size"] = rl_config.get("batch_size", 64)
+        model_kwargs["n_epochs"] = rl_config.get("n_epochs", 10)
+        model_kwargs["clip_range"] = rl_config.get("clip_range", 0.2)
+
+    model = algo_cls(**model_kwargs)
+
     # Train
-    model.learn(total_timesteps=total_timesteps)
+    log_interval = rl_config.get("log_interval", 1)
+    print(f"Training {algo_name.upper()} with {env_type} env, {n_envs} envs, {total_timesteps} steps")
+    model.learn(total_timesteps=total_timesteps, log_interval=log_interval, progress_bar=True)
 
     # Save
     os.makedirs(run_dir, exist_ok=True)

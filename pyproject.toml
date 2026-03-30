@@ -8,7 +8,13 @@ dependencies = [
     "gymnasium>=0.29",
     "stable-baselines3>=2.0",
     "numpy>=1.24",
+    "tensorboard>=2.0",
+    "tqdm",
+    "rich",
 ]
+
+[tool.setuptools.packages.find]
+include = ["serverless_sim*", "gym_env*", "rl_agent*"]
 
 [project.scripts]
 serverless-sim = "serverless_sim.runtime.cli:main"
