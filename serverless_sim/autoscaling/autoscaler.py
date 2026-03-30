@@ -99,6 +99,8 @@ class OpenWhiskPoolAutoscaler:
             for inst in instances:
                 if inst.state == "warm" and inst.is_idle:
                     timeout = self._idle_timeout.get(inst.service_id, 60.0)
+                    if timeout < 0:
+                        continue  # -1 means never evict
                     if (now - inst.last_used_at) >= timeout:
                         # Check min_instances before evicting (alive = warm + running)
                         alive_count = self._count_alive_instances(inst.service_id)

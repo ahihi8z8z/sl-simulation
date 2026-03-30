@@ -437,34 +437,27 @@ def process_csv(csv_path: str, output_dir: str, window: int, train_ratio: float,
     out["phase"] = ""
 
     if hourly:
-        # Map hourly predictions back to minutes
-        df_hourly_out = df_hourly.copy()
-        df_hourly_out["predicted_count"] = np.nan
-        df_hourly_out["phase"] = ""
+        # Output 1 row per hour — same format as aggregate trace CSV
+        # (minute = hour * 60, count = hourly actual, predicted_count = hourly predicted)
+        out = df_hourly.copy()
+        out["minute"] = out["hour"] * 60  # hour start in minutes
+        out["predicted_count"] = np.nan
+        out["phase"] = ""
 
-        # Mark phases on hourly
-        df_hourly_out.loc[:split_idx - 1, "phase"] = "train"
-        df_hourly_out.loc[split_idx:, "phase"] = "test"
+        # Mark phases
+        out.loc[:split_idx - 1, "phase"] = "train"
+        out.loc[split_idx:, "phase"] = "test"
 
-        # Fill hourly predictions
+        # Fill predictions (offset by window)
         train_start = window
         train_end = train_start + len(train_pred)
         test_start = train_end
         test_end = test_start + len(test_pred)
 
-        df_hourly_out.loc[train_start:train_end - 1, "predicted_count"] = train_pred
-        df_hourly_out.loc[test_start:test_end - 1, "predicted_count"] = test_pred
+        out.loc[train_start:train_end - 1, "predicted_count"] = train_pred
+        out.loc[test_start:test_end - 1, "predicted_count"] = test_pred
 
-        # Build hour -> (predicted_count, phase) lookup
-        # Divide by 60 to convert hourly sum to per-minute average
-        hour_pred = dict(zip(df_hourly_out["hour"], df_hourly_out["predicted_count"] / 60.0))
-        hour_phase = dict(zip(df_hourly_out["hour"], df_hourly_out["phase"]))
-
-        # Broadcast to minute-level: each minute gets its hour's prediction
-        out["hour"] = out["minute"] // 60
-        out["predicted_count"] = out["hour"].map(hour_pred)
-        out["phase"] = out["hour"].map(hour_phase).fillna("")
-        out.drop(columns=["hour"], inplace=True)
+        out = out[["minute", "function_id", "count", "duration", "predicted_count", "phase"]]
     else:
         # Mark phases on all rows
         out.loc[:split_idx - 1, "phase"] = "train"
@@ -501,13 +494,9 @@ def plot_predictions(csv_path: str, output_dir: str, hourly: bool = False,
     name = Path(csv_path).stem.replace("_lstm_pred", "")
 
     if hourly:
-        # Aggregate to hourly for plotting
-        df["hour"] = df["minute"] // 60
-        plot_df = df.groupby("hour").agg(
-            count=("count", "sum"),
-            predicted_count=("predicted_count", "first"),
-            phase=("phase", "first"),
-        ).reset_index()
+        # CSV already has 1 row per hour with hourly counts
+        plot_df = df.copy()
+        plot_df["hour"] = plot_df["minute"] // 60
         x_col = "hour"
         x_divisor = 24.0  # hours -> days
     else:
@@ -520,11 +509,6 @@ def plot_predictions(csv_path: str, output_dir: str, hourly: bool = False,
     plot_df["_x_days"] = plot_df[x_col] / x_divisor
     x_col = "_x_days"
     x_label = "Day"
-
-    # Filter to plot range (in days)
-    if plot_range is not None:
-        day_min, day_max = plot_range
-        plot_df = plot_df[(plot_df[x_col] >= day_min) & (plot_df[x_col] <= day_max)]
 
     has_pred = plot_df["predicted_count"].notna()
     train_mask = has_pred & (plot_df["phase"] == "train")
@@ -543,7 +527,7 @@ def plot_predictions(csv_path: str, output_dir: str, hourly: bool = False,
             ax.plot(x, y, color=color, alpha=0.6, linewidth=0.5 if small else 0.8,
                     label=label)
 
-    # --- Top: full view ---
+    # --- Top: full view (always shows entire dataset) ---
     ax = axes[0]
     actual_mask = nonzero if plot_style == "scatter" else plot_df.index
     _draw(ax, plot_df.loc[actual_mask, x_col], plot_df.loc[actual_mask, "count"],
@@ -564,21 +548,31 @@ def plot_predictions(csv_path: str, output_dir: str, hourly: bool = False,
     ax.legend(loc="upper right", fontsize=8)
     ax.grid(True, alpha=0.3)
 
-    # --- Bottom: test phase zoom ---
+    # --- Bottom: zoom view (plot_range or test phase) ---
     ax2 = axes[1]
-    if test_mask.any():
-        test_actual_mask = (test_mask & nonzero) if plot_style == "scatter" else test_mask
-        _draw(ax2, plot_df.loc[test_actual_mask, x_col], plot_df.loc[test_actual_mask, "count"],
-              "#2196F3", "Actual")
-        _draw(ax2, plot_df.loc[test_mask, x_col], plot_df.loc[test_mask, "predicted_count"],
-              "#F44336", "Predicted (test)")
-        ax2.set_xlim(plot_df.loc[test_mask, x_col].min(),
-                     plot_df.loc[test_mask, x_col].max())
-        ax2.legend(loc="upper right", fontsize=8)
+    if plot_range is not None:
+        day_min, day_max = plot_range
+        zoom_mask = (plot_df[x_col] >= day_min) & (plot_df[x_col] <= day_max)
+        zoom_df = plot_df[zoom_mask]
+    elif test_mask.any():
+        zoom_df = plot_df[test_mask | (nonzero & (plot_df[x_col] >= plot_df.loc[test_mask, x_col].min()))]
+    else:
+        zoom_df = plot_df
 
+    zoom_nonzero = zoom_df["count"] > 0
+    zoom_has_pred = zoom_df["predicted_count"].notna()
+    zoom_actual = zoom_nonzero if plot_style == "scatter" else zoom_df.index.isin(zoom_df.index)
+
+    _draw(ax2, zoom_df.loc[zoom_actual, x_col], zoom_df.loc[zoom_actual, "count"],
+          "#2196F3", "Actual")
+    _draw(ax2, zoom_df.loc[zoom_has_pred, x_col], zoom_df.loc[zoom_has_pred, "predicted_count"],
+          "#F44336", "Predicted")
+    ax2.legend(loc="upper right", fontsize=8)
+
+    zoom_title = f"Zoom: Day {plot_range[0]}-{plot_range[1]}" if plot_range else "Test Phase (zoom)"
     ax2.set_xlabel(x_label)
     ax2.set_ylabel("Invocation Count")
-    ax2.set_title(f"Test Phase (zoom)")
+    ax2.set_title(zoom_title)
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
@@ -647,6 +641,8 @@ def main():
                         help="Plot style: scatter or line (default: scatter)")
     parser.add_argument("--grid-search", action="store_true",
                         help="Grid search for best hyperparameters per CSV")
+    parser.add_argument("--hidden-size", type=int, default=32,
+                        help="LSTM hidden size (default: 32)")
     args = parser.parse_args()
 
     results = []
@@ -655,6 +651,7 @@ def main():
             csv_path, args.output_dir, args.window, args.train_ratio,
             args.epochs, args.batch_size, args.lr, args.patience, args.device,
             hourly=args.hourly, do_grid_search=args.grid_search,
+            hidden_size=args.hidden_size,
         )
         if ret is not None:
             results.append((csv_path, ret[0], ret[1]))

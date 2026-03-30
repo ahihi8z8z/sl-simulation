@@ -226,7 +226,7 @@ class AggregateRecord:
     """One row from the aggregate trace CSV."""
     minute: int
     function_id: str
-    count: int
+    count: float
     duration: float | None = None
 
 
@@ -284,7 +284,7 @@ class AggregateTraceGenerator(BaseGenerator):
                 count_raw = row[c["count"]]
                 if not count_raw or count_raw == "":
                     continue
-                count_val = round(float(count_raw))
+                count_val = float(count_raw)
                 if count_val <= 0:
                     continue
                 record = AggregateRecord(
@@ -346,16 +346,31 @@ class AggregateTraceGenerator(BaseGenerator):
         records: list[AggregateRecord],
         stop_time: float | None,
     ):
-        """SimPy process: distribute count requests evenly within each minute."""
+        """SimPy process: distribute requests evenly within each minute.
+
+        Uses carry-over accumulation for fractional counts so that
+        long-run totals are preserved.  E.g. four consecutive minutes
+        with count=0.3 produce 0, 0, 0, 1 requests respectively.
+        """
         ctx = self.ctx
         env = ctx.env
+        remainder = 0.0
 
         for record in records:
             minute_start = record.minute * self.MINUTE_SECONDS
-            scaled_count = max(1, round(record.count * self._scale))
-            interval = self.MINUTE_SECONDS / scaled_count
 
-            for i in range(scaled_count):
+            # Accumulate fractional count with carry-over
+            # Clamp to 0 to prevent negative values from eating remainder
+            remainder += max(0.0, record.count * self._scale)
+            emit_count = int(remainder + 1e-9)
+            remainder -= emit_count
+
+            if emit_count <= 0:
+                continue
+
+            interval = self.MINUTE_SECONDS / emit_count
+
+            for i in range(emit_count):
                 target_time = minute_start + i * interval
 
                 if target_time > env.now:
@@ -385,7 +400,7 @@ class AggregateTraceGenerator(BaseGenerator):
                 ctx.logger.debug(
                     "t=%.3f | AGG_ARRIVE | %s service=%s (minute=%d, %d/%d)",
                     env.now, request_id, service.service_id,
-                    record.minute, i + 1, record.count,
+                    record.minute, i + 1, emit_count,
                 )
 
                 if ctx.dispatcher is not None:
@@ -398,8 +413,15 @@ class AggregateTraceGenerator(BaseGenerator):
 
     @property
     def total_requests(self) -> int:
-        """Total requests that will be generated (after scaling)."""
-        return sum(max(1, round(r.count * self._scale)) for r in self._records)
+        """Total requests that will be generated (after scaling, with carry-over)."""
+        remainder = 0.0
+        total = 0
+        for r in self._records:
+            remainder += max(0.0, r.count * self._scale)
+            emit = int(remainder + 1e-9)
+            remainder -= emit
+            total += emit
+        return total
 
     @property
     def function_ids(self) -> set[str]:
