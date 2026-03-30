@@ -175,6 +175,7 @@ class VahidiniaEnv(gym.Env):
         return obs, reward, terminated, truncated, {
             "snapshot": snapshot,
             "step": self._current_step,
+            "reward_components": self._last_reward_components,
         }
 
     # ------------------------------------------------------------------
@@ -227,6 +228,14 @@ class VahidiniaEnv(gym.Env):
             memory_inefficiency = 0.0
 
         reward = -cold_ratio - self.memory_penalty_weight * memory_inefficiency
+
+        self._last_reward_components = {
+            "cold_ratio": cold_ratio,
+            "memory_inefficiency": memory_inefficiency,
+            "d_cold": d_cold,
+            "d_total": d_total,
+        }
+
         return float(reward)
 
     # ------------------------------------------------------------------

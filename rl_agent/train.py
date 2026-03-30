@@ -5,10 +5,24 @@ from __future__ import annotations
 import json
 import os
 
+import numpy as np
 from stable_baselines3 import PPO, A2C
+from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
 
+
+class RewardComponentLogger(BaseCallback):
+    """Logs reward components from VahidiniaEnv info to TensorBoard."""
+
+    def _on_step(self) -> bool:
+        infos = self.locals.get("infos", [])
+        components = [i.get("reward_components") for i in infos if "reward_components" in i]
+        if components:
+            for key in components[0]:
+                mean_val = np.mean([c[key] for c in components])
+                self.logger.record(f"reward/{key}", mean_val)
+        return True
 
 
 ALGORITHMS = {"ppo": PPO, "a2c": A2C}
@@ -103,7 +117,12 @@ def run_training(
     # Train
     log_interval = rl_config.get("log_interval", 1)
     print(f"Training {algo_name.upper()} with {env_type} env, {n_envs} envs, {total_timesteps} steps")
-    model.learn(total_timesteps=total_timesteps, log_interval=log_interval, progress_bar=True)
+    model.learn(
+        total_timesteps=total_timesteps,
+        log_interval=log_interval,
+        progress_bar=True,
+        callback=RewardComponentLogger(),
+    )
 
     # Save
     os.makedirs(run_dir, exist_ok=True)
