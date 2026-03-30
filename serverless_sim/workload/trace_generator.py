@@ -52,11 +52,21 @@ class TraceReplayGenerator(BaseGenerator):
 
     The trace is loaded entirely into memory on construction.
     A warning is issued if the file exceeds ``MAX_TRACE_SIZE_MB``.
+
+    Parameters
+    ----------
+    start_minute, end_minute : float | None
+        If set, only replay records whose timestamp (in minutes) falls
+        within [start_minute, end_minute). Timestamps are shifted so that
+        start_minute becomes time 0 in the simulation.
     """
 
-    def __init__(self, trace_path: str):
+    def __init__(self, trace_path: str, start_minute: float | None = None,
+                 end_minute: float | None = None):
         self.ctx: SimContext | None = None
         self._request_counter = 0
+        self._start_minute = start_minute
+        self._end_minute = end_minute
         self._records: list[TraceRecord] = []
         self._load_trace(trace_path)
 
@@ -82,6 +92,26 @@ class TraceReplayGenerator(BaseGenerator):
                 self._records.append(record)
 
         self._records.sort(key=lambda r: r.timestamp)
+        self._apply_time_range()
+
+    def _apply_time_range(self) -> None:
+        """Filter and shift records based on start_minute/end_minute."""
+        start_sec = self._start_minute * 60.0 if self._start_minute is not None else None
+        end_sec = self._end_minute * 60.0 if self._end_minute is not None else None
+
+        if start_sec is not None or end_sec is not None:
+            filtered = []
+            for r in self._records:
+                if start_sec is not None and r.timestamp < start_sec:
+                    continue
+                if end_sec is not None and r.timestamp >= end_sec:
+                    continue
+                filtered.append(r)
+            # Shift timestamps so start_minute becomes time 0
+            offset = start_sec if start_sec is not None else 0.0
+            for r in filtered:
+                r.timestamp -= offset
+            self._records = filtered
 
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
@@ -194,14 +224,24 @@ class AggregateTraceGenerator(BaseGenerator):
     For each row, ``count`` requests are distributed evenly within that
     minute (interval = 60 / count).  If ``duration`` is present, it is
     set as ``invocation.service_time`` for ``PrecomputedServingModel``.
+
+    Parameters
+    ----------
+    start_minute, end_minute : int | None
+        If set, only replay records whose minute falls within
+        [start_minute, end_minute). Minutes are shifted so that
+        start_minute becomes minute 0 in the simulation.
     """
 
     MINUTE_SECONDS = 60.0
 
-    def __init__(self, trace_path: str, scale: float = 1.0):
+    def __init__(self, trace_path: str, scale: float = 1.0,
+                 start_minute: int | None = None, end_minute: int | None = None):
         self.ctx: SimContext | None = None
         self._request_counter = 0
         self._scale = scale
+        self._start_minute = start_minute
+        self._end_minute = end_minute
         self._records: list[AggregateRecord] = []
         self._load_trace(trace_path)
 
@@ -228,6 +268,23 @@ class AggregateTraceGenerator(BaseGenerator):
                     self._records.append(record)
 
         self._records.sort(key=lambda r: r.minute)
+        self._apply_time_range()
+
+    def _apply_time_range(self) -> None:
+        """Filter and shift records based on start_minute/end_minute."""
+        if self._start_minute is not None or self._end_minute is not None:
+            filtered = []
+            for r in self._records:
+                if self._start_minute is not None and r.minute < self._start_minute:
+                    continue
+                if self._end_minute is not None and r.minute >= self._end_minute:
+                    continue
+                filtered.append(r)
+            # Shift minutes so start_minute becomes minute 0
+            offset = self._start_minute if self._start_minute is not None else 0
+            for r in filtered:
+                r.minute -= offset
+            self._records = filtered
 
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
