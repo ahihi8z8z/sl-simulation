@@ -168,6 +168,7 @@ class MultiDiscreteEnv(gym.Env):
         return obs, reward, terminated, truncated, {
             "snapshot": snapshot,
             "step": self._current_step,
+            "reward_components": self._reward_calc.last_components,
         }
 
     def _get_snapshot(self) -> dict:

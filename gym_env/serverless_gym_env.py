@@ -151,7 +151,11 @@ class ServerlessGymEnv(gym.Env):
         terminated = False
         truncated = self._current_step >= self.max_steps
 
-        info = {"snapshot": snapshot, "step": self._current_step}
+        info = {
+            "snapshot": snapshot,
+            "step": self._current_step,
+            "reward_components": self._reward_calc.last_components,
+        }
 
         return obs, reward, terminated, truncated, info
 

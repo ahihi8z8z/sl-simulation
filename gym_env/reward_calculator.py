@@ -88,4 +88,14 @@ class RewardCalculator:
             + self.cpu_efficiency_reward * cpu_eff
         )
 
+        self.last_components = {
+            "drop_ratio": drop_ratio,
+            "cold_start_ratio": cold_ratio,
+            "memory_efficiency": mem_eff,
+            "cpu_efficiency": cpu_eff,
+            "d_total": d_total,
+            "d_cold": d_cold,
+            "d_dropped": d_dropped,
+        }
+
         return float(reward)
