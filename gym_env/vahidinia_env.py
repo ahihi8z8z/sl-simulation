@@ -78,6 +78,7 @@ class VahidiniaEnv(gym.Env):
         self._prev_total = 0.0
         self._prev_total_mem_sec = 0.0
         self._prev_running_mem_sec = 0.0
+        self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
 
         # Build once to determine spaces
         self._build()
@@ -137,6 +138,7 @@ class VahidiniaEnv(gym.Env):
         self._prev_total = 0.0
         self._prev_total_mem_sec = 0.0
         self._prev_running_mem_sec = 0.0
+        self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
 
         snapshot = self._get_snapshot()
         obs = self._build_obs(snapshot)
@@ -164,10 +166,10 @@ class VahidiniaEnv(gym.Env):
         ctx = self._engine.ctx
         ctx.env.run(until=ctx.env.now + self.step_duration)
 
-        # Collect
+        # Collect — compute reward first (updates deltas), then build obs from deltas
         snapshot = self._get_snapshot()
-        obs = self._build_obs(snapshot)
         reward = self._compute_reward(snapshot, action)
+        obs = self._build_obs(snapshot)
 
         terminated = False
         truncated = self._current_step >= self.max_steps
@@ -179,18 +181,19 @@ class VahidiniaEnv(gym.Env):
         }
 
     # ------------------------------------------------------------------
-    # Observation: [inter_arrival_time, last_cold_start] per service
+    # Observation: [avg_inter_arrival_time, cold_start_ratio] per service
     # ------------------------------------------------------------------
 
     def _build_obs(self, snapshot: dict) -> np.ndarray:
         obs = np.zeros(len(self._service_ids) * 2, dtype=np.float32)
+        rc = self._last_reward_components
         for i, svc_id in enumerate(self._service_ids):
-            obs[2 * i] = float(snapshot.get(
-                f"request.{svc_id}.inter_arrival_time", 0.0
-            ))
-            obs[2 * i + 1] = float(snapshot.get(
-                f"request.{svc_id}.last_cold_start", 0.0
-            ))
+            d_total = rc.get("d_total", 0.0)
+            d_cold = rc.get("d_cold", 0.0)
+            # Average inter-arrival time = step_duration / n_requests
+            obs[2 * i] = self.step_duration / max(d_total, 1.0)
+            # Cold start ratio over the step
+            obs[2 * i + 1] = d_cold / max(d_total, 1.0)
         return obs
 
     # ------------------------------------------------------------------
