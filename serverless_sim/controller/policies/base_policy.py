@@ -18,4 +18,4 @@ class BaseControlPolicy:
             {"action": "set_min_instances", "service_id": "svc-a", "value": 2}
             {"action": "set_max_instances", "service_id": "svc-a", "value": 10}
         """
-        raise NotImplementedError
+        return []  # no-op by default
