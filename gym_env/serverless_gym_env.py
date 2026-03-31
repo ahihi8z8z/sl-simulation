@@ -94,7 +94,8 @@ class ServerlessGymEnv(gym.Env):
 
         # Observation builder
         obs_metrics = self.gym_config.get("observation_metrics", None)
-        self._obs_builder = ObservationBuilder(metric_names=obs_metrics)
+        self._obs_builder = ObservationBuilder(metric_names=obs_metrics,
+                                                  step_duration=self.step_duration)
 
         # Action mapper
         service_ids = list(ctx.workload_manager.services.keys())
