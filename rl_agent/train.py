@@ -162,20 +162,29 @@ def run_training(
     else:
         model = algo_cls(**model_kwargs)
 
+    # Generate versioned run name: model_name_v1, model_name_v2, ...
+    save_dir = rl_config.get("output_dir", run_dir)
+    os.makedirs(save_dir, exist_ok=True)
+
+    version = 1
+    while os.path.exists(os.path.join(save_dir, f"{model_name}_v{version}.zip")):
+        version += 1
+    versioned_name = f"{model_name}_v{version}"
+
     # Train
     log_interval = rl_config.get("log_interval", 1)
     print(f"Training {algo_name.upper()} with {env_type} env, {n_envs} envs, {total_timesteps} steps")
+    print(f"Run: {versioned_name}")
     model.learn(
         total_timesteps=total_timesteps,
         log_interval=log_interval,
         progress_bar=True,
         callback=RewardComponentLogger(),
+        tb_log_name=versioned_name,
     )
 
-    # Save — use output_dir from config if set, otherwise run_dir
-    save_dir = rl_config.get("output_dir", run_dir)
-    os.makedirs(save_dir, exist_ok=True)
-    model_path = os.path.join(save_dir, model_name)
+    # Save model with versioned name
+    model_path = os.path.join(save_dir, versioned_name)
     model.save(model_path)
 
     # Save VecNormalize stats if used

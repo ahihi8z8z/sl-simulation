@@ -71,5 +71,5 @@ class TestRunTraining:
 
         model_path = run_training(SIM_CONFIG, GYM_CONFIG, rl_path, run_dir=tmpdir)
 
-        assert model_path.endswith("my_model")
+        assert "my_model_v" in model_path
         assert os.path.exists(model_path + ".zip")
