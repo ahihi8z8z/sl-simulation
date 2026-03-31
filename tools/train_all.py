@@ -17,12 +17,12 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 
 
 def find_services(base_dir: str) -> list[str]:
-    """Find service directories containing rl_train.json."""
+    """Find service directories containing rl_train.json (recursive)."""
     # Single service dir
     if os.path.exists(os.path.join(base_dir, "rl_train.json")):
         return [base_dir]
-    # Parent dir with multiple services
-    services = sorted(glob.glob(os.path.join(base_dir, "*", "rl_train.json")))
+    # Search recursively
+    services = sorted(glob.glob(os.path.join(base_dir, "**", "rl_train.json"), recursive=True))
     return [os.path.dirname(s) for s in services]
 
 
