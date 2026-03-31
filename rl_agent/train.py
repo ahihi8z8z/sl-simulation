@@ -9,7 +9,7 @@ import numpy as np
 from stable_baselines3 import PPO, A2C
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
+from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
 
 
 class RewardComponentLogger(BaseCallback):
@@ -82,6 +82,12 @@ def run_training(
     else:
         vec_env = DummyVecEnv(env_fns)
 
+    # Optional VecNormalize wrapper
+    normalize_obs = rl_config.get("normalize_obs", False)
+    normalize_reward = rl_config.get("normalize_reward", False)
+    if normalize_obs or normalize_reward:
+        vec_env = VecNormalize(vec_env, norm_obs=normalize_obs, norm_reward=normalize_reward)
+
     # Common SB3 params
     model_kwargs = dict(
         policy="MlpPolicy",
@@ -112,7 +118,20 @@ def run_training(
         model_kwargs["n_epochs"] = rl_config.get("n_epochs", 10)
         model_kwargs["clip_range"] = rl_config.get("clip_range", 0.2)
 
-    model = algo_cls(**model_kwargs)
+    # Resume from existing model or create new
+    resume_path = rl_config.get("resume_model_path", None)
+    if resume_path and os.path.exists(resume_path + ".zip"):
+        # Load VecNormalize stats if they exist
+        vec_norm_path = resume_path + "_vecnormalize.pkl"
+        if isinstance(vec_env, VecNormalize) and os.path.exists(vec_norm_path):
+            vec_env = VecNormalize.load(vec_norm_path, vec_env.venv)
+            print(f"VecNormalize restored from {vec_norm_path}")
+        model = algo_cls.load(resume_path, env=vec_env, **{
+            k: v for k, v in model_kwargs.items() if k not in ("policy", "env")
+        })
+        print(f"Resumed from {resume_path}")
+    else:
+        model = algo_cls(**model_kwargs)
 
     # Train
     log_interval = rl_config.get("log_interval", 1)
@@ -128,6 +147,12 @@ def run_training(
     os.makedirs(run_dir, exist_ok=True)
     model_path = os.path.join(run_dir, model_name)
     model.save(model_path)
+
+    # Save VecNormalize stats if used
+    if isinstance(vec_env, VecNormalize):
+        vec_norm_path = model_path + "_vecnormalize.pkl"
+        vec_env.save(vec_norm_path)
+        print(f"VecNormalize saved to {vec_norm_path}")
 
     vec_env.close()
 

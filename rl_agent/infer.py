@@ -7,6 +7,7 @@ import os
 
 import numpy as np
 from stable_baselines3 import PPO, A2C
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 
 ALGORITHMS = {"ppo": PPO, "a2c": A2C}
@@ -57,29 +58,52 @@ def run_inference(
         raise ValueError(f"Unknown algorithm '{algo_name}'. Choose from: {list(ALGORITHMS.keys())}")
     model = algo_cls.load(model_path, device=device)
 
+    # Check for VecNormalize stats
+    vec_norm_path = model_path + "_vecnormalize.pkl"
+    has_vec_norm = os.path.exists(vec_norm_path)
+
     # Run episodes
     all_rewards = []
     all_steps = []
 
     for ep in range(n_episodes):
         env = env_class(sim_config_path, gym_config_path, seed=seed + ep)
-        obs, _ = env.reset()
+
+        if has_vec_norm:
+            vec_env = DummyVecEnv([lambda: env])
+            vec_env = VecNormalize.load(vec_norm_path, vec_env)
+            vec_env.training = False
+            vec_env.norm_reward = False
+            obs = vec_env.reset()
+        else:
+            obs, _ = env.reset()
+
         episode_reward = 0.0
         step_count = 0
 
         while True:
             action, _ = model.predict(obs, deterministic=deterministic)
-            obs, reward, terminated, truncated, info = env.step(action)
-            episode_reward += reward
-            step_count += 1
-            if terminated or truncated:
-                break
+            if has_vec_norm:
+                obs, reward, done, info = vec_env.step(action)
+                episode_reward += reward[0]
+                step_count += 1
+                if done[0]:
+                    break
+            else:
+                obs, reward, terminated, truncated, info = env.step(action)
+                episode_reward += reward
+                step_count += 1
+                if terminated or truncated:
+                    break
 
         all_rewards.append(episode_reward)
         all_steps.append(step_count)
 
         print(f"Episode {ep + 1}/{n_episodes}: reward={episode_reward:.2f}, steps={step_count}")
-        env.close()
+        if has_vec_norm:
+            vec_env.close()
+        else:
+            env.close()
 
     summary = {
         "n_episodes": n_episodes,
