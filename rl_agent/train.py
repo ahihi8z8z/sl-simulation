@@ -13,16 +13,29 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNorm
 
 
 class RewardComponentLogger(BaseCallback):
-    """Logs reward components from VahidiniaEnv info to TensorBoard."""
+    """Logs reward components from VahidiniaEnv info to TensorBoard.
+
+    Accumulates values across all steps in a rollout and logs
+    the mean when SB3 calls _on_rollout_end.
+    """
+
+    def __init__(self, verbose=0):
+        super().__init__(verbose)
+        self._buffer: dict[str, list[float]] = {}
 
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
-        components = [i.get("reward_components") for i in infos if "reward_components" in i]
-        if components:
-            for key in components[0]:
-                mean_val = np.mean([c[key] for c in components])
-                self.logger.record(f"reward/{key}", mean_val)
+        for info in infos:
+            rc = info.get("reward_components")
+            if rc:
+                for key, val in rc.items():
+                    self._buffer.setdefault(key, []).append(val)
         return True
+
+    def _on_rollout_end(self) -> None:
+        for key, vals in self._buffer.items():
+            self.logger.record(f"reward/{key}", np.mean(vals))
+        self._buffer.clear()
 
 
 ALGORITHMS = {"ppo": PPO, "a2c": A2C}
@@ -143,9 +156,10 @@ def run_training(
         callback=RewardComponentLogger(),
     )
 
-    # Save
-    os.makedirs(run_dir, exist_ok=True)
-    model_path = os.path.join(run_dir, model_name)
+    # Save — use output_dir from config if set, otherwise run_dir
+    save_dir = rl_config.get("output_dir", run_dir)
+    os.makedirs(save_dir, exist_ok=True)
+    model_path = os.path.join(save_dir, model_name)
     model.save(model_path)
 
     # Save VecNormalize stats if used
