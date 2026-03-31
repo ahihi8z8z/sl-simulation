@@ -13,15 +13,17 @@ from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNorm
 
 
 class RewardComponentLogger(BaseCallback):
-    """Logs reward components from VahidiniaEnv info to TensorBoard.
+    """Logs reward components to TensorBoard.
 
-    Accumulates values across all steps in a rollout and logs
-    the mean when SB3 calls _on_rollout_end.
+    Works for both on-policy (PPO/A2C) and off-policy (DQN):
+    - On-policy: logs mean at rollout end
+    - Off-policy: logs mean every log_interval steps (default 100)
     """
 
-    def __init__(self, verbose=0):
+    def __init__(self, log_interval: int = 100, verbose=0):
         super().__init__(verbose)
         self._buffer: dict[str, list[float]] = {}
+        self._log_interval = log_interval
 
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
@@ -30,9 +32,19 @@ class RewardComponentLogger(BaseCallback):
             if rc:
                 for key, val in rc.items():
                     self._buffer.setdefault(key, []).append(val)
+
+        # For off-policy: flush every log_interval steps
+        if self.num_timesteps % self._log_interval == 0 and self._buffer:
+            self._flush()
+
         return True
 
     def _on_rollout_end(self) -> None:
+        """Called by on-policy algorithms at end of rollout."""
+        if self._buffer:
+            self._flush()
+
+    def _flush(self) -> None:
         for key, vals in self._buffer.items():
             self.logger.record(f"reward/{key}", np.mean(vals))
         self._buffer.clear()
