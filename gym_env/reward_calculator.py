@@ -4,18 +4,19 @@ from __future__ import annotations
 class RewardCalculator:
     """Computes reward from ratios and efficiency metrics.
 
-    Reward = w_drop * (-drop_ratio)
-           + w_cold * (-cold_start_ratio)
+    Reward = -w_drop * drop_ratio
+           - w_cold * cold_start_ratio
            + w_mem  * memory_efficiency
            + w_cpu  * cpu_efficiency
 
-    All components in [0, 1]. Reward range: [-(w_drop + w_cold), (w_mem + w_cpu)].
+    All weights are positive. All components in [0, 1].
+    Reward range: [-(w_drop + w_cold), (w_mem + w_cpu)].
     """
 
     def __init__(
         self,
-        drop_penalty: float = -1.0,
-        cold_start_penalty: float = -0.5,
+        drop_penalty: float = 1.0,
+        cold_start_penalty: float = 0.5,
         memory_efficiency_reward: float = 0.3,
         cpu_efficiency_reward: float = 0.2,
         # Backward-compat: ignored if set
@@ -23,10 +24,10 @@ class RewardCalculator:
         resource_penalty: float = 0.0,
         throughput_reward: float = 0.0,
     ):
-        self.drop_penalty = drop_penalty
-        self.cold_start_penalty = cold_start_penalty
-        self.memory_efficiency_reward = memory_efficiency_reward
-        self.cpu_efficiency_reward = cpu_efficiency_reward
+        self.drop_penalty = abs(drop_penalty)
+        self.cold_start_penalty = abs(cold_start_penalty)
+        self.memory_efficiency_reward = abs(memory_efficiency_reward)
+        self.cpu_efficiency_reward = abs(cpu_efficiency_reward)
 
         # Previous cumulative values for computing deltas
         self._prev_total = 0.0
@@ -82,8 +83,8 @@ class RewardCalculator:
         cpu_eff = (d_running_cpu / d_total_cpu) if d_total_cpu > 0 else 0.0
 
         reward = (
-            self.drop_penalty * drop_ratio
-            + self.cold_start_penalty * cold_ratio
+            - self.drop_penalty * drop_ratio
+            - self.cold_start_penalty * cold_ratio
             + self.memory_efficiency_reward * mem_eff
             + self.cpu_efficiency_reward * cpu_eff
         )

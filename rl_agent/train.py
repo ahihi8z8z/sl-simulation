@@ -29,7 +29,8 @@ class RewardComponentLogger(BaseCallback):
         infos = self.locals.get("infos", [])
         for info in infos:
             rc = info.get("reward_components")
-            if rc:
+            if rc and rc.get("d_total", 0) > 0:
+                # Only buffer steps with actual traffic
                 for key, val in rc.items():
                     self._buffer.setdefault(key, []).append(val)
 
