@@ -6,7 +6,7 @@ import json
 import os
 
 import numpy as np
-from stable_baselines3 import PPO, A2C
+from stable_baselines3 import PPO, A2C, DQN
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
@@ -38,7 +38,7 @@ class RewardComponentLogger(BaseCallback):
         self._buffer.clear()
 
 
-ALGORITHMS = {"ppo": PPO, "a2c": A2C}
+ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN}
 
 
 def _make_env(env_class, sim_config_path: str, gym_config_path: str, seed: int):
@@ -79,6 +79,9 @@ def run_training(
     if env_type == "vahidinia":
         from gym_env.vahidinia_env import VahidiniaEnv
         env_class = VahidiniaEnv
+    elif env_type == "multi_discrete":
+        from gym_env.multi_discrete_env import MultiDiscreteEnv
+        env_class = MultiDiscreteEnv
     else:
         from gym_env.serverless_gym_env import ServerlessGymEnv
         env_class = ServerlessGymEnv
@@ -106,12 +109,7 @@ def run_training(
         policy="MlpPolicy",
         env=vec_env,
         learning_rate=rl_config.get("learning_rate", 3e-4),
-        n_steps=rl_config.get("n_steps", 128),
         gamma=rl_config.get("gamma", 0.99),
-        gae_lambda=rl_config.get("gae_lambda", 0.95),
-        ent_coef=rl_config.get("ent_coef", 0.0),
-        vf_coef=rl_config.get("vf_coef", 0.5),
-        normalize_advantage=rl_config.get("normalize_advantages", True),
         device=rl_config.get("device", "auto"),
         verbose=1,
     )
@@ -125,11 +123,29 @@ def run_training(
     if policy_kwargs:
         model_kwargs["policy_kwargs"] = policy_kwargs
 
+    # On-policy params (PPO, A2C)
+    if algo_name in ("ppo", "a2c"):
+        model_kwargs["n_steps"] = rl_config.get("n_steps", 128)
+        model_kwargs["gae_lambda"] = rl_config.get("gae_lambda", 0.95)
+        model_kwargs["ent_coef"] = rl_config.get("ent_coef", 0.0)
+        model_kwargs["vf_coef"] = rl_config.get("vf_coef", 0.5)
+        model_kwargs["normalize_advantage"] = rl_config.get("normalize_advantages", True)
+
     # PPO-specific params
     if algo_name == "ppo":
         model_kwargs["batch_size"] = rl_config.get("batch_size", 64)
         model_kwargs["n_epochs"] = rl_config.get("n_epochs", 10)
         model_kwargs["clip_range"] = rl_config.get("clip_range", 0.2)
+
+    # DQN-specific params
+    if algo_name == "dqn":
+        model_kwargs["buffer_size"] = rl_config.get("buffer_size", 100000)
+        model_kwargs["batch_size"] = rl_config.get("batch_size", 32)
+        model_kwargs["learning_starts"] = rl_config.get("learning_starts", 1000)
+        model_kwargs["train_freq"] = rl_config.get("train_freq", 4)
+        model_kwargs["target_update_interval"] = rl_config.get("target_update_interval", 1000)
+        model_kwargs["exploration_fraction"] = rl_config.get("exploration_fraction", 0.1)
+        model_kwargs["exploration_final_eps"] = rl_config.get("exploration_final_eps", 0.05)
 
     # Resume from existing model or create new
     resume_path = rl_config.get("resume_model_path", None)
