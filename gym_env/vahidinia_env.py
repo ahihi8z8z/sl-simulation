@@ -229,7 +229,7 @@ class VahidiniaEnv(gym.Env):
         reward = -cold_ratio + self.memory_penalty_weight * memory_efficiency
 
         self._last_reward_components = {
-            "cold_ratio": cold_ratio,
+            "cold_start_ratio": cold_ratio,
             "memory_efficiency": memory_efficiency,
             "d_cold": d_cold,
             "d_total": d_total,
