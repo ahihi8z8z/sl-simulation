@@ -76,6 +76,8 @@ class VahidiniaEnv(gym.Env):
         self._current_step = 0
         self._prev_cold_starts = 0.0
         self._prev_total = 0.0
+        self._prev_completed = 0.0
+        self._prev_latency_sum = 0.0
         self._prev_total_mem_sec = 0.0
         self._prev_running_mem_sec = 0.0
         self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
@@ -136,6 +138,8 @@ class VahidiniaEnv(gym.Env):
         self._current_step = 0
         self._prev_cold_starts = 0.0
         self._prev_total = 0.0
+        self._prev_completed = 0.0
+        self._prev_latency_sum = 0.0
         self._prev_total_mem_sec = 0.0
         self._prev_running_mem_sec = 0.0
         self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
@@ -203,12 +207,21 @@ class VahidiniaEnv(gym.Env):
     def _compute_reward(self, snapshot: dict, action: np.ndarray) -> float:
         cold_starts = float(snapshot.get("request.cold_starts", 0.0))
         total = float(snapshot.get("request.total", 0.0))
+        completed = float(snapshot.get("request.completed", 0.0))
+        latency_mean = float(snapshot.get("request.latency_mean", 0.0))
 
         # Deltas since last step
         d_cold = cold_starts - self._prev_cold_starts
         d_total = total - self._prev_total
+        d_completed = completed - self._prev_completed
+        latency_sum_now = latency_mean * completed
+        d_latency_sum = latency_sum_now - self._prev_latency_sum
+        step_latency_mean = (d_latency_sum / d_completed) if d_completed > 0 else 0.0
+
         self._prev_cold_starts = cold_starts
         self._prev_total = total
+        self._prev_completed = completed
+        self._prev_latency_sum = latency_sum_now
 
         # Cold-start ratio penalty
         cold_ratio = d_cold / max(d_total, 1.0)
@@ -231,6 +244,7 @@ class VahidiniaEnv(gym.Env):
         self._last_reward_components = {
             "cold_start_ratio": cold_ratio,
             "memory_efficiency": memory_efficiency,
+            "latency_mean": step_latency_mean,
             "d_cold": d_cold,
             "d_total": d_total,
         }

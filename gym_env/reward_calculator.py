@@ -31,8 +31,10 @@ class RewardCalculator:
 
         # Previous cumulative values for computing deltas
         self._prev_total = 0.0
+        self._prev_completed = 0.0
         self._prev_dropped = 0.0
         self._prev_cold_starts = 0.0
+        self._prev_latency_sum = 0.0
         self._prev_total_mem_sec = 0.0
         self._prev_running_mem_sec = 0.0
         self._prev_total_cpu_sec = 0.0
@@ -40,8 +42,10 @@ class RewardCalculator:
 
     def reset(self) -> None:
         self._prev_total = 0.0
+        self._prev_completed = 0.0
         self._prev_dropped = 0.0
         self._prev_cold_starts = 0.0
+        self._prev_latency_sum = 0.0
         self._prev_total_mem_sec = 0.0
         self._prev_running_mem_sec = 0.0
         self._prev_total_cpu_sec = 0.0
@@ -50,8 +54,10 @@ class RewardCalculator:
     def compute(self, snapshot: dict) -> float:
         """Compute reward from current metric snapshot."""
         total = snapshot.get("request.total", 0.0)
+        completed = snapshot.get("request.completed", 0.0)
         dropped = snapshot.get("request.dropped", 0.0)
         cold_starts = snapshot.get("request.cold_starts", 0.0)
+        latency_mean = snapshot.get("request.latency_mean", 0.0)
         total_mem_sec = snapshot.get("lifecycle.total_memory_seconds", 0.0)
         running_mem_sec = snapshot.get("lifecycle.running_memory_seconds", 0.0)
         total_cpu_sec = snapshot.get("lifecycle.total_cpu_seconds", 0.0)
@@ -59,16 +65,24 @@ class RewardCalculator:
 
         # Deltas
         d_total = total - self._prev_total
+        d_completed = completed - self._prev_completed
         d_dropped = dropped - self._prev_dropped
         d_cold = cold_starts - self._prev_cold_starts
+
+        # Per-step latency: derive from cumulative mean and completed count
+        latency_sum_now = latency_mean * completed
+        d_latency_sum = latency_sum_now - self._prev_latency_sum
+        step_latency_mean = (d_latency_sum / d_completed) if d_completed > 0 else 0.0
         d_total_mem = total_mem_sec - self._prev_total_mem_sec
         d_running_mem = running_mem_sec - self._prev_running_mem_sec
         d_total_cpu = total_cpu_sec - self._prev_total_cpu_sec
         d_running_cpu = running_cpu_sec - self._prev_running_cpu_sec
 
         self._prev_total = total
+        self._prev_completed = completed
         self._prev_dropped = dropped
         self._prev_cold_starts = cold_starts
+        self._prev_latency_sum = latency_sum_now
         self._prev_total_mem_sec = total_mem_sec
         self._prev_running_mem_sec = running_mem_sec
         self._prev_total_cpu_sec = total_cpu_sec
@@ -94,7 +108,9 @@ class RewardCalculator:
             "cold_start_ratio": cold_ratio,
             "memory_efficiency": mem_eff,
             "cpu_efficiency": cpu_eff,
+            "latency_mean": step_latency_mean,
             "d_total": d_total,
+            "d_completed": d_completed,
             "d_cold": d_cold,
             "d_dropped": d_dropped,
         }
