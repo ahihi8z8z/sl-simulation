@@ -111,13 +111,18 @@ class MultiDiscreteEnv(gym.Env):
         self._obs_builder = ObservationBuilder(metric_names=obs_metrics,
                                                   step_duration=self.step_duration)
 
-        # Action mapper — discover pool states from autoscaler
+        # Action mapper — use config override or discover from autoscaler
         service_ids = list(ctx.workload_manager.services.keys())
+        pool_states_override = self.gym_config.get("pool_states", None)
         pool_states = {}
-        if ctx.autoscaling_manager:
-            for svc_id in service_ids:
+        for svc_id in service_ids:
+            if pool_states_override:
+                pool_states[svc_id] = pool_states_override
+            elif ctx.autoscaling_manager:
                 states = ctx.autoscaling_manager._get_pool_states(svc_id)
                 pool_states[svc_id] = states if states else ["prewarm"]
+            else:
+                pool_states[svc_id] = ["prewarm"]
 
         self._action_mapper = MultiActionMapper(
             service_ids=service_ids,
