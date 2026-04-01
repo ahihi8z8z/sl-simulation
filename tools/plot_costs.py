@@ -1,8 +1,6 @@
-"""Plot cold-start cost analysis from *_costs.csv files.
+"""Plot cold-start cost breakdown from *_costs.csv files.
 
-Generates:
-  - 6 individual figures: smoothed daily request rate per function
-  - 1 combined figure: stacked bar chart of mean cost proportions across all functions
+Generates a stacked bar chart of mean cost proportions across all functions.
 
 Usage:
     python tools/plot_costs.py [--input-dir datasets/request_per_min] [--output-dir plots]
@@ -18,43 +16,24 @@ import numpy as np
 import pandas as pd
 
 
-# ------------------------------------------------------------------ #
-# Style constants
-# ------------------------------------------------------------------ #
-
 COST_COLS = ["podAllocationCost", "deployCodeCost", "deployDependencyCost"]
 COST_LABELS = ["Pod Allocation", "Deploy Code", "Deploy Dependency"]
 
-TRAFFIC_COLOR = "#FF9800"
 
-
-# ------------------------------------------------------------------ #
-# Data loading
-# ------------------------------------------------------------------ #
-
-def find_function_files(input_dir: str) -> list[dict]:
-    """Find paired traffic + costs CSVs for each function."""
+def find_cost_files(input_dir: str) -> list[dict]:
+    """Find *_costs.csv files."""
     cost_files = sorted(glob.glob(os.path.join(input_dir, "*_costs.csv")))
     functions = []
     for cost_path in cost_files:
         filename = os.path.basename(cost_path)
         base = filename.replace("_costs.csv", "")
         label = re.sub(r"_\d+---.*$", "", base)
-        traffic_path = os.path.join(input_dir, base + ".csv")
         functions.append({
             "label": label,
             "base": base,
-            "traffic_path": traffic_path if os.path.exists(traffic_path) else None,
             "costs_path": cost_path,
         })
     return functions
-
-
-def load_traffic(path: str) -> pd.DataFrame:
-    """Load traffic CSV. Returns DataFrame with time (seconds) and mean_rq."""
-    df = pd.read_csv(path)
-    df["mean_rq"] = pd.to_numeric(df["mean_rq"], errors="coerce")
-    return df
 
 
 def load_costs(path: str) -> pd.DataFrame:
@@ -66,103 +45,21 @@ def load_costs(path: str) -> pd.DataFrame:
     return df
 
 
-# ------------------------------------------------------------------ #
-# Per-function plot: smoothed daily traffic
-# ------------------------------------------------------------------ #
-
-def parse_smooth_window(s: str) -> int:
-    """Parse smoothing window string like '1h', '6h', '1d' into minutes."""
-    s = s.strip().lower()
-    if s.endswith("d"):
-        return int(s[:-1]) * 1440
-    elif s.endswith("h"):
-        return int(s[:-1]) * 60
-    elif s.endswith("m"):
-        return int(s[:-1])
-    else:
-        return int(s)
-
-
-RATE_UNITS = {
-    "min": {"factor": 1.0, "ylabel": "Requests / min"},
-    "hour": {"factor": 60.0, "ylabel": "Requests / hour"},
-    "day": {"factor": 1440.0, "ylabel": "Requests / day"},
-}
-
-
-def plot_traffic_daily(ax, traffic_df: pd.DataFrame, label: str,
-                       smooth_minutes: int = 60, rate_unit: str = "min") -> None:
-    """Plot request rate smoothed by moving average. X-axis in days."""
-    df = traffic_df.copy()
-    df["day"] = df["time"] / 86400.0
-
-    # Fill NaN with 0 (no requests), then moving average
-    df["filled"] = df["mean_rq"].fillna(0.0)
-    window = max(1, smooth_minutes)
-    df["smooth"] = df["filled"].rolling(window=window, center=True, min_periods=window).mean()
-
-    # Scale to requested unit
-    unit_cfg = RATE_UNITS.get(rate_unit, RATE_UNITS["min"])
-    df["smooth"] = df["smooth"] * unit_cfg["factor"]
-
-    ax.plot(df["day"], df["smooth"], color=TRAFFIC_COLOR, linewidth=1.5, label="Traffic")
-
-    # Mean line
-    mean_val = df["smooth"].mean()
-    ax.axhline(y=mean_val, color="red", linestyle="--", linewidth=1, label=f"Mean: {mean_val:.2f}")
-    ax.legend(fontsize=9)
-
-    ax.set_xlabel("Day", fontsize=10)
-    ax.set_ylabel(unit_cfg["ylabel"], fontsize=10)
-    ax.set_title(f"Traffic (daily avg) — {label}", fontsize=11)
-    ax.grid(axis="y", linestyle="--", alpha=0.3)
-
-
-def plot_function_traffic(func_info: dict, output_dir: str,
-                          smooth_minutes: int = 60, rate_unit: str = "min") -> str | None:
-    """Generate traffic figure for one function. Returns output path or None."""
-    if func_info["traffic_path"] is None:
-        return None
-
-    label = func_info["label"]
-    traffic_df = load_traffic(func_info["traffic_path"])
-
-    fig, ax = plt.subplots(figsize=(8, 4))
-    plot_traffic_daily(ax, traffic_df, label, smooth_minutes=smooth_minutes, rate_unit=rate_unit)
-    fig.suptitle(label, fontsize=13, fontweight="bold", y=1.02)
-    plt.tight_layout()
-
-    safe_name = label.replace(" ", "_").replace("/", "_")
-    output_path = os.path.join(output_dir, f"{safe_name}_traffic.png")
-    plt.savefig(output_path, dpi=150, bbox_inches="tight")
-    plt.close()
-    return output_path
-
-
-# ------------------------------------------------------------------ #
-# Combined stacked bar chart: mean cost proportions
-# ------------------------------------------------------------------ #
-
 def plot_combined_costs(functions: list[dict], output_dir: str) -> str:
     """Plot stacked bar chart of mean cost proportions for all functions."""
     rows = []
-    counts = []
     for func_info in functions:
-        label = func_info["base"]  # Use full base name to avoid duplicates
-        display = func_info["label"]
         costs_df = load_costs(func_info["costs_path"])
         means = {col: costs_df[col].mean() for col in COST_COLS}
-        means["runtime"] = display
+        means["runtime"] = func_info["label"]
         means["_count"] = len(costs_df)
         rows.append(means)
 
     df = pd.DataFrame(rows)
-
-    # Sort by total mean descending
     df["_total"] = df[COST_COLS].sum(axis=1)
     df = df.sort_values("_total", ascending=False).reset_index(drop=True)
 
-    mean_vals = df[COST_COLS].values  # numpy array
+    mean_vals = df[COST_COLS].values
     row_totals = mean_vals.sum(axis=1, keepdims=True)
     pct_vals = mean_vals / np.where(row_totals > 0, row_totals, 1.0)
 
@@ -176,31 +73,24 @@ def plot_combined_costs(functions: list[dict], output_dir: str) -> str:
         axes.bar(x, pct_vals[:, j], bottom=bottoms, label=clabel, color=color)
         bottoms += pct_vals[:, j]
 
-    # Collect legend handles from bar patches
     legend_handles = {}
     for j, clabel in enumerate(COST_LABELS):
         legend_handles[clabel] = axes.patches[j * len(df)]
 
-    # Remove default legend, use formatted one
     top_pad = 0.12
     fig.subplots_adjust(top=1.0 - top_pad)
-    legend_cols = len(COST_LABELS)
     fig.legend(
         list(legend_handles.values()),
         list(legend_handles.keys()),
         loc="lower center",
         bbox_to_anchor=(0.5, 1.0 - top_pad + 0.004),
-        ncol=legend_cols,
+        ncol=len(COST_LABELS),
         fontsize=7.5,
         frameon=True,
         fancybox=False,
         framealpha=1.0,
         edgecolor="black",
         borderpad=0.28,
-        handlelength=2.5,
-        handletextpad=0.6,
-        columnspacing=1.2,
-        borderaxespad=0.0,
     )
 
     for i in range(len(df)):
@@ -210,7 +100,8 @@ def plot_combined_costs(functions: list[dict], output_dir: str) -> str:
             val = mean_vals[i, j]
             y = cumulative + pct / 2
             if pct > 0.05:
-                axes.text(i, y, f"{val:.3f}", ha="center", va="center", fontsize=8, color="white", fontweight="bold")
+                axes.text(i, y, f"{val:.3f}", ha="center", va="center",
+                          fontsize=8, color="white", fontweight="bold")
             cumulative += pct
         axes.text(i, 1.02, f"n={df.iloc[i]['_count']:.0f}", ha="center", fontsize=8)
 
@@ -228,63 +119,27 @@ def plot_combined_costs(functions: list[dict], output_dir: str) -> str:
     return output_path
 
 
-# ------------------------------------------------------------------ #
-# CLI
-# ------------------------------------------------------------------ #
-
 def main():
-    parser = argparse.ArgumentParser(description="Plot cold-start cost analysis")
-    parser.add_argument(
-        "--input-dir",
-        default="datasets/request_per_min",
-        help="Directory containing *_costs.csv and matching traffic CSVs",
-    )
-    parser.add_argument(
-        "--output-dir",
-        default="plots",
-        help="Output directory for figures",
-    )
-    parser.add_argument(
-        "--smooth",
-        default="1h",
-        help="Smoothing window for traffic (e.g. 30m, 1h, 6h, 1d). Default: 1h",
-    )
-    parser.add_argument(
-        "--rate-unit",
-        default="min",
-        choices=["min", "hour", "day"],
-        help="Rate unit for traffic y-axis (min, hour, day). Default: min",
-    )
+    parser = argparse.ArgumentParser(description="Plot cold-start cost breakdown")
+    parser.add_argument("--input-dir", default="datasets/request_per_min",
+                        help="Directory containing *_costs.csv files")
+    parser.add_argument("--output-dir", default="plots",
+                        help="Output directory for figures")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
 
-    functions = find_function_files(args.input_dir)
+    functions = find_cost_files(args.input_dir)
     if not functions:
         print(f"No *_costs.csv files found in {args.input_dir}")
         return
 
-    print(f"Found {len(functions)} function types:")
+    print(f"Found {len(functions)} functions:")
     for f in functions:
-        print(f"  {f['label']} ({os.path.basename(f['costs_path'])})")
-    print()
+        print(f"  {f['label']}")
 
-    smooth_minutes = parse_smooth_window(args.smooth)
-    rate_unit = args.rate_unit
-    print(f"Smoothing window: {args.smooth} ({smooth_minutes} minutes), rate unit: {rate_unit}\n")
-
-    # Per-function traffic plots
-    for func_info in functions:
-        path = plot_function_traffic(func_info, args.output_dir,
-                                     smooth_minutes=smooth_minutes, rate_unit=rate_unit)
-        if path:
-            print(f"  Saved: {path}")
-
-    # Combined cost breakdown
-    combined_path = plot_combined_costs(functions, args.output_dir)
-    print(f"  Saved: {combined_path}")
-
-    print(f"\nAll figures saved to {args.output_dir}/")
+    path = plot_combined_costs(functions, args.output_dir)
+    print(f"\nSaved: {path}")
 
 
 if __name__ == "__main__":
