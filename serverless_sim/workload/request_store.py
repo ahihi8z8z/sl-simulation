@@ -96,8 +96,8 @@ class RequestStore:
             if inv.cold_start:
                 self.counters.cold_starts += 1
             self._last_cold_start[inv.service_id] = inv.cold_start
-            if inv.completion_time is not None and inv.arrival_time is not None:
-                self._latency_sum += inv.completion_time - inv.arrival_time
+            if inv.execution_start_time is not None and inv.arrival_time is not None:
+                self._latency_sum += inv.execution_start_time - inv.arrival_time
         elif status == "dropped":
             self.counters.dropped += 1
         elif status == "truncated":
