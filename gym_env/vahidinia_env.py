@@ -6,7 +6,7 @@ Two-layer approach to mitigate cold start in serverless computing:
 
 State space : [inter_arrival_time, last_cold_start] per service
 Action space: continuous idle-container window value in [min, max] seconds
-Reward      : -(cold_starts / total_invocations) - (1 - memory_efficiency)
+Reward      : -(cold_starts / total_invocations) + weight * memory_efficiency
 """
 
 from __future__ import annotations
@@ -197,8 +197,7 @@ class VahidiniaEnv(gym.Env):
         return obs
 
     # ------------------------------------------------------------------
-    # Reward: -(Cold/N) - P   (Equation 1 in paper)
-    #   P = memory inefficiency = 1 - (running_mem_sec / total_mem_sec)
+    # Reward: -cold_ratio + weight * memory_efficiency
     # ------------------------------------------------------------------
 
     def _compute_reward(self, snapshot: dict, action: np.ndarray) -> float:
@@ -223,18 +222,15 @@ class VahidiniaEnv(gym.Env):
         self._prev_total_mem_sec = total_mem_sec
         self._prev_running_mem_sec = running_mem_sec
 
-        # Inefficiency: fraction of memory-seconds wasted on non-running states
-        # 0.0 = perfectly efficient, 1.0 = all memory wasted
-        if d_total_mem > 0:
-            memory_inefficiency = 1.0 - (d_running_mem / d_total_mem)
-        else:
-            memory_inefficiency = 0.0
+        # Efficiency: fraction of memory-seconds used for running
+        # 0.0 = all memory wasted, 1.0 = perfectly efficient
+        memory_efficiency = (d_running_mem / d_total_mem) if d_total_mem > 0 else 0.0
 
-        reward = -cold_ratio - self.memory_penalty_weight * memory_inefficiency
+        reward = -cold_ratio + self.memory_penalty_weight * memory_efficiency
 
         self._last_reward_components = {
             "cold_ratio": cold_ratio,
-            "memory_inefficiency": memory_inefficiency,
+            "memory_efficiency": memory_efficiency,
             "d_cold": d_cold,
             "d_total": d_total,
         }

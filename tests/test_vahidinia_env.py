@@ -48,13 +48,14 @@ class TestVahidiniaEnv:
         assert obs[0] >= 0.0
         env.close()
 
-    def test_reward_is_negative(self):
-        """Paper reward -(Cold/N) - P should always be <= 0."""
+    def test_reward_is_bounded(self):
+        """Reward should be bounded: [-1, weight]."""
         env = VahidiniaEnv(SIM_CONFIG)
         env.reset()
         for _ in range(10):
             _, reward, terminated, truncated, _ = env.step(env.action_space.sample())
-            assert reward <= 0.0
+            assert reward >= -1.0
+            assert reward <= env.memory_penalty_weight
             if terminated or truncated:
                 break
         env.close()
