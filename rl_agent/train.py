@@ -7,9 +7,31 @@ import os
 
 import numpy as np
 from stable_baselines3 import PPO, A2C, DQN
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+
+
+class CheckpointWithNormalize(BaseCallback):
+    """Save model + VecNormalize stats periodically."""
+
+    def __init__(self, save_freq: int, save_path: str, name_prefix: str = "checkpoint", verbose=0):
+        super().__init__(verbose)
+        self.save_freq = save_freq
+        self.save_path = save_path
+        self.name_prefix = name_prefix
+
+    def _on_step(self) -> bool:
+        if self.num_timesteps % self.save_freq == 0:
+            path = os.path.join(self.save_path, f"{self.name_prefix}_{self.num_timesteps}_steps")
+            self.model.save(path)
+            # Save VecNormalize if present
+            env = self.model.get_env()
+            if isinstance(env, VecNormalize):
+                env.save(path + "_vecnormalize.pkl")
+            if self.verbose:
+                print(f"Checkpoint saved: {path}")
+        return True
 
 
 class RewardComponentLogger(BaseCallback):
@@ -186,13 +208,46 @@ def run_training(
 
     # Train
     log_interval = rl_config.get("log_interval", 1)
+    save_freq = rl_config.get("save_freq", 0)
+
+    callbacks = [RewardComponentLogger()]
+    if save_freq > 0:
+        callbacks.append(CheckpointWithNormalize(
+            save_freq=save_freq,
+            save_path=save_dir,
+            name_prefix=versioned_name,
+        ))
+
+    # Early stopping based on eval reward
+    eval_freq = rl_config.get("eval_freq", 0)
+    early_stop_patience = rl_config.get("early_stop_patience", 0)
+    if eval_freq > 0:
+        eval_env = DummyVecEnv([_make_env(env_class, sim_config_path, gym_config_path, seed=9999)])
+        if normalize_obs or normalize_reward:
+            eval_env = VecNormalize(eval_env, norm_obs=normalize_obs, norm_reward=normalize_reward)
+
+        eval_kwargs = dict(
+            eval_env=eval_env,
+            eval_freq=eval_freq,
+            n_eval_episodes=rl_config.get("n_eval_episodes", 1),
+            best_model_save_path=os.path.join(save_dir, "best"),
+            deterministic=True,
+            verbose=1,
+        )
+        if early_stop_patience > 0:
+            eval_kwargs["callback_after_eval"] = StopTrainingOnNoModelImprovement(
+                max_no_improvement_evals=early_stop_patience,
+                verbose=1,
+            )
+        callbacks.append(EvalCallback(**eval_kwargs))
+
     print(f"Training {algo_name.upper()} with {env_type} env, {n_envs} envs, {total_timesteps} steps")
     print(f"Run: {versioned_name}")
     model.learn(
         total_timesteps=total_timesteps,
         log_interval=log_interval,
         progress_bar=True,
-        callback=RewardComponentLogger(),
+        callback=callbacks,
         tb_log_name=versioned_name,
     )
 
