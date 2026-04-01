@@ -58,8 +58,12 @@ class PredictivePolicy(BaseControlPolicy):
         minute_column: str = "minute",
         function_id_column: str = "function_id",
         predict_scale: float = 1.0,
+        avg_duration: float = 0.0,
+        interval: float = 3600.0,
     ):
         self._predict_scale = predict_scale
+        self._avg_duration = avg_duration
+        self._interval = interval
         # Load predictions: {(minute, function_id): predicted_count}
         self._predictions: dict[tuple[int, str], float] = {}
         # Also build sorted minute list per function_id for nearest lookup
@@ -125,7 +129,14 @@ class PredictivePolicy(BaseControlPolicy):
             if predicted is None:
                 continue
 
-            pool_count = max(0, math.ceil(predicted * self._predict_scale))
+            # predicted = invocations per hour (unscaled)
+            # pool_target = concurrent containers needed
+            # = predicted_requests * avg_duration / interval
+            scaled_requests = predicted * self._predict_scale
+            if self._avg_duration > 0:
+                pool_count = max(0, math.ceil(scaled_requests * self._avg_duration / self._interval))
+            else:
+                pool_count = max(0, math.ceil(scaled_requests))
 
             pool_states = ctx.autoscaling_manager._get_pool_states(svc_id)
             first_state = pool_states[0] if pool_states else "prewarm"

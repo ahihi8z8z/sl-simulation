@@ -83,6 +83,8 @@ class SimulationBuilder:
                     predict_path=ctrl_cfg["predict_path"],
                     predict_column=ctrl_cfg.get("predict_column", "predicted_count"),
                     predict_scale=ctrl_cfg.get("predict_scale", 1.0),
+                    avg_duration=ctrl_cfg.get("avg_duration", 0.0),
+                    interval=ctrl_cfg.get("interval", 3600.0),
                 )
             else:
                 policy = BaseControlPolicy()  # no-op
