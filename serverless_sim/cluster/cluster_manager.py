@@ -60,6 +60,8 @@ class ClusterManager:
                 "processing_factor", default_processing_factor
             ),
             max_queue_depth=node_cfg.get("max_queue_depth", 0),
+            reserved_cpu=node_cfg.get("reserved_cpu", 0.0),
+            reserved_memory=node_cfg.get("reserved_memory", 0.0),
         )
         if serving_model_type == "precomputed":
             serving_model = PrecomputedServingModel()

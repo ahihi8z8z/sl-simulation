@@ -32,7 +32,14 @@ class Node:
         self.serving_model = serving_model
         self.logger = logger or logging.getLogger(__name__)
 
-        # Resource accounting
+        # System reserved resources (applied only when node has pods)
+        self.reserved = ResourceProfile(
+            cpu=compute_class.reserved_cpu,
+            memory=compute_class.reserved_memory,
+        )
+        self._reserved_applied = False
+
+        # Resource accounting — starts at full capacity (reserved applied on first allocate)
         self.allocated = ResourceProfile(cpu=0.0, memory=0.0)
         self.available = ResourceProfile(cpu=capacity.cpu, memory=capacity.memory)
 
@@ -49,6 +56,10 @@ class Node:
 
     def allocate(self, request: ResourceProfile) -> bool:
         """Try to allocate resources. Returns True on success."""
+        # Apply reserved on first allocation (node gets a pod)
+        if not self._reserved_applied and (self.reserved.cpu > 0 or self.reserved.memory > 0):
+            self.available = self.available.subtract(self.reserved)
+            self._reserved_applied = True
         if not self.available.can_fit(request):
             return False
         self.allocated = self.allocated.add(request)
@@ -64,10 +75,16 @@ class Node:
             cpu=max(0.0, self.allocated.cpu),
             memory=max(0.0, self.allocated.memory),
         )
+        max_avail_cpu = self.capacity.cpu - (self.reserved.cpu if self._reserved_applied else 0.0)
+        max_avail_mem = self.capacity.memory - (self.reserved.memory if self._reserved_applied else 0.0)
         self.available = ResourceProfile(
-            cpu=min(self.capacity.cpu, self.available.cpu),
-            memory=min(self.capacity.memory, self.available.memory),
+            cpu=min(max_avail_cpu, self.available.cpu),
+            memory=min(max_avail_mem, self.available.memory),
         )
+        # Release reserved when no more containers
+        if self._reserved_applied and self.allocated.cpu <= 0 and self.allocated.memory <= 0:
+            self.available = self.available.add(self.reserved)
+            self._reserved_applied = False
 
     def can_fit(self, request: ResourceProfile) -> bool:
         """Check if resources can be allocated without modifying state."""
