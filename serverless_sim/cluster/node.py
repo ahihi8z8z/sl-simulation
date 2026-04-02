@@ -141,6 +141,23 @@ class Node:
                             )
                             return
 
+                # Check if node has enough memory for a new container
+                service = self._ctx.workload_manager.services[invocation.service_id]
+                peak_mem = ResourceProfile(cpu=0.0, memory=service.peak_memory)
+                if not self.available.can_fit(peak_mem):
+                    invocation.dropped = True
+                    invocation.drop_reason = "no_resources"
+                    invocation.status = "dropped"
+                    invocation.completion_time = self.env.now
+                    self._ctx.request_table.finalize(invocation)
+                    self.logger.debug(
+                        "t=%.3f | %s | DROP %s (no_resources, avail_mem=%.0f, need=%.0f)",
+                        self.env.now, self.node_id,
+                        invocation.request_id,
+                        self.available.memory, service.peak_memory,
+                    )
+                    return
+
                 # Full cold start: create new instance from null
                 cold_start_proc = lm.prepare_instance_for_service(self, invocation.service_id)
                 instance = yield cold_start_proc
