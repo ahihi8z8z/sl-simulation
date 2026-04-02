@@ -69,7 +69,7 @@ class SimulationBuilder:
             # Placement strategy (used by global pool mode)
             from serverless_sim.scheduling.placement_strategy import create_placement_strategy
             ctx.placement_strategy = create_placement_strategy(
-                auto_cfg.get("placement_strategy", "least_loaded")
+                auto_cfg.get("placement_strategy", "best_fit")
             )
 
         # Monitoring
