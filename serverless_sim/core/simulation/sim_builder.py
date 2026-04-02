@@ -58,11 +58,19 @@ class SimulationBuilder:
         # Autoscaling
         auto_cfg = config.get("autoscaling", {})
         if auto_cfg.get("enabled", False):
+            pool_mode = auto_cfg.get("pool_mode", "per_node")
             autoscaler = OpenWhiskPoolAutoscaler(
                 ctx,
                 reconcile_interval=auto_cfg.get("reconcile_interval", 5.0),
+                pool_mode=pool_mode,
             )
             ctx.autoscaling_manager = autoscaler
+
+            # Placement strategy (used by global pool mode)
+            from serverless_sim.scheduling.placement_strategy import create_placement_strategy
+            ctx.placement_strategy = create_placement_strategy(
+                auto_cfg.get("placement_strategy", "least_loaded")
+            )
 
         # Monitoring
         mon_cfg = config.get("monitoring", {})

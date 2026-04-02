@@ -7,8 +7,8 @@
 ## Features
 
 - [ ] Eviction Policy pluggable (LRU, LFU, FIFO, TTL-per-state, Predictive) — config: `autoscaling.eviction_policy`
-- [ ] PlacementStrategy cho autoscaler pool fill (HashAffinity, BinPack, Spread) — config: `autoscaling.placement`
+- [x] PlacementStrategy cho autoscaler pool fill — config: `autoscaling.placement_strategy` (LeastLoaded implemented)
 - [ ] Control Policy chọn từ config thay vì hardcode trong sim_builder — config: `controller.policy`
 - [ ] Reward Calculator pluggable (MultiObjective, Pareto) — config: `gym.reward_type`
 - [ ] FindThenRoute load balancer strategy (warm-aware routing)
-- [ ] `pool_mode: "per_node" | "global"` — global mode counts pool_target/min_instances cluster-wide, places on least-loaded node (like AWS Lambda / Knative). Currently per-node (OpenWhisk style). Workaround: use single node.
+- [x] `pool_mode: "per_node" | "global"` — global mode counts pool_target/min_instances cluster-wide, places on least-loaded node.

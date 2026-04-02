@@ -27,6 +27,7 @@ class SimContext:
     monitor_manager: Any = None
     controller: Optional[Any] = None
     export_manager: Optional[Any] = None
+    placement_strategy: Optional[Any] = None
 
     # Central request store (replaces plain dict for memory efficiency)
     request_table: RequestStore = field(default_factory=RequestStore)
