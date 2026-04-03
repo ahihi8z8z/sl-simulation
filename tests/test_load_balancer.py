@@ -74,7 +74,7 @@ class TestShardingBalancer:
         ok = lb.dispatch(inv)
         assert ok is True
         assert inv.assigned_node_id is not None
-        assert inv.status == "queued"
+        assert inv.status == "dispatched"
         assert inv.dispatch_time == 0.0
 
     def test_affinity_same_service(self):
@@ -145,8 +145,8 @@ class TestShardingBalancer:
 
         ctx.env.run(until=5.0)
 
-        queued = [inv for inv in ctx.request_table.values() if inv.status == "queued"]
-        assert len(queued) > 0
-        # All queued requests should have a node assigned
-        for inv in queued:
+        dispatched = [inv for inv in ctx.request_table.values() if inv.status == "dispatched"]
+        assert len(dispatched) > 0
+        # All dispatched requests should have a node assigned
+        for inv in dispatched:
             assert inv.assigned_node_id is not None

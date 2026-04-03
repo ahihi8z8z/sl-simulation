@@ -38,10 +38,35 @@ class BaseLoadBalancer:
         """Refresh and return enabled nodes."""
         return self.ctx.cluster_manager.get_enabled_nodes()
 
-    def _can_accept(self, node: Node, mem_required: float) -> bool:
-        """Check if node can accept a request (queue not full + enough memory)."""
-        if node.queue_is_full:
-            return False
+    def _can_serve(self, node: Node, invocation: Invocation) -> bool:
+        """Check if node can serve this request.
+
+        Optimistic pre-check at dispatch time. Node does a definitive
+        re-check when processing (state may change between checks).
+
+        Accepts if queue not full AND one of:
+        1. Has a warm/reusable container with free slot
+        2. Has a promotable intermediate container
+        3. Has enough memory to create a new container (and max_instances not exceeded)
+        """
+        # Check warm/reusable container
+        if self.ctx.lifecycle_manager:
+            inst = self.ctx.lifecycle_manager.find_reusable_instance(node, invocation.service_id)
+            if inst is not None:
+                return True
+            # Check promotable intermediate instance
+            prom = self.ctx.lifecycle_manager.find_promotable_instance(node, invocation.service_id)
+            if prom is not None:
+                return True
+        # Check max_instances
+        if self.ctx.autoscaling_manager:
+            max_inst = self.ctx.autoscaling_manager.get_max_instances(invocation.service_id)
+            if max_inst > 0:
+                total = self.ctx.autoscaling_manager._count_total_instances(invocation.service_id)
+                if total >= max_inst:
+                    return False
+        # Check resource for new container
+        mem_required = self._get_mem_required(invocation)
         resource_req = ResourceProfile(cpu=0.0, memory=mem_required)
         return node.available.can_fit(resource_req)
 
@@ -51,12 +76,13 @@ class BaseLoadBalancer:
         return service.peak_memory if service else 0.0
 
     def _assign(self, invocation: Invocation, node: Node) -> None:
-        """Assign invocation to node and put it in the queue."""
+        """Assign invocation to node and start processing directly."""
         invocation.assigned_node_id = node.node_id
         invocation.dispatch_time = self.ctx.env.now
         invocation.queue_enter_time = self.ctx.env.now
-        invocation.status = "queued"
-        node.queue.put(invocation)
+        invocation.status = "dispatched"
+        # Process directly — no queue
+        node.env.process(node._process_request(invocation))
 
     def _drop(self, invocation: Invocation, reason: str) -> None:
         """Drop an invocation."""
@@ -92,12 +118,11 @@ class HashRingBalancer(BaseLoadBalancer):
 
         n = len(nodes)
         primary_idx = self._hash_to_index(invocation.service_id, n)
-        mem_required = self._get_mem_required(invocation)
 
         for offset in range(n):
             idx = (primary_idx + offset) % n
             node = nodes[idx]
-            if self._can_accept(node, mem_required):
+            if self._can_serve(node, invocation):
                 self._assign(invocation, node)
                 self.logger.debug(
                     "t=%.3f | DISPATCH | %s → %s (hash, offset=%d)",
@@ -136,12 +161,11 @@ class RoundRobinBalancer(BaseLoadBalancer):
             return False
 
         n = len(nodes)
-        mem_required = self._get_mem_required(invocation)
 
         for offset in range(n):
             idx = (self._counter + offset) % n
             node = nodes[idx]
-            if self._can_accept(node, mem_required):
+            if self._can_serve(node, invocation):
                 self._assign(invocation, node)
                 self._counter = (idx + 1) % n
                 self.logger.debug(
@@ -163,10 +187,8 @@ class LeastLoadedBalancer(BaseLoadBalancer):
             self._drop(invocation, "no_nodes")
             return False
 
-        mem_required = self._get_mem_required(invocation)
-
-        # Filter nodes that can accept, pick the one with most available memory
-        candidates = [n for n in nodes if self._can_accept(n, mem_required)]
+        # Filter nodes that can serve, pick the one with most available memory
+        candidates = [n for n in nodes if self._can_serve(n, invocation)]
         if not candidates:
             self._drop(invocation, "no_capacity")
             return False
@@ -192,11 +214,10 @@ class PowerOfTwoChoicesBalancer(BaseLoadBalancer):
             self._drop(invocation, "no_nodes")
             return False
 
-        mem_required = self._get_mem_required(invocation)
         n = len(nodes)
 
         if n == 1:
-            if self._can_accept(nodes[0], mem_required):
+            if self._can_serve(nodes[0], invocation):
                 self._assign(invocation, nodes[0])
                 return True
             self._drop(invocation, "no_capacity")
@@ -208,7 +229,7 @@ class PowerOfTwoChoicesBalancer(BaseLoadBalancer):
         candidates = [nodes[i] for i in indices]
 
         # Filter acceptable candidates
-        acceptable = [nd for nd in candidates if self._can_accept(nd, mem_required)]
+        acceptable = [nd for nd in candidates if self._can_serve(nd, invocation)]
 
         if acceptable:
             # Pick the one with shorter queue
@@ -222,7 +243,7 @@ class PowerOfTwoChoicesBalancer(BaseLoadBalancer):
 
         # Fallback: scan all nodes
         for node in nodes:
-            if self._can_accept(node, mem_required):
+            if self._can_serve(node, invocation):
                 self._assign(invocation, node)
                 self.logger.debug(
                     "t=%.3f | DISPATCH | %s → %s (p2c_fallback)",

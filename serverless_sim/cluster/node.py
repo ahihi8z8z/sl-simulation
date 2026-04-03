@@ -127,6 +127,8 @@ class Node:
 
     def _process_request(self, invocation):
         """SimPy process: find/create instance → execute → complete."""
+        if not self._ctx or not self._ctx.lifecycle_manager:
+            return
         lm = self._ctx.lifecycle_manager
 
         # Try to find a warm reusable instance
