@@ -6,7 +6,7 @@ Two-layer approach to mitigate cold start in serverless computing:
 
 State space : [inter_arrival_time, last_cold_start] per service
 Action space: continuous idle-container window value in [min, max] seconds
-Reward      : -(cold_starts / total_invocations) + weight * memory_efficiency
+Reward      : -(cold_starts / total_invocations) - weight * mem_per_request
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ class VahidiniaEnv(gym.Env):
         self.idle_timeout_max = self.gym_config.get("idle_timeout_max", 900.0)
 
         # Reward config
-        self.memory_penalty_weight = self.gym_config.get("memory_penalty_weight", 1.0)
+        self.memory_penalty_weight = self.gym_config.get("memory_penalty_weight", 0.001)
 
         # Internal state
         self._engine: SimulationEngine | None = None
@@ -80,9 +80,7 @@ class VahidiniaEnv(gym.Env):
         self._prev_dropped = 0.0
         self._prev_latency_sum = 0.0
         self._prev_total_mem_sec = 0.0
-        self._prev_running_mem_sec = 0.0
         self._prev_total_cpu_sec = 0.0
-        self._prev_running_cpu_sec = 0.0
         self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
 
         # Build once to determine spaces
@@ -145,9 +143,7 @@ class VahidiniaEnv(gym.Env):
         self._prev_dropped = 0.0
         self._prev_latency_sum = 0.0
         self._prev_total_mem_sec = 0.0
-        self._prev_running_mem_sec = 0.0
         self._prev_total_cpu_sec = 0.0
-        self._prev_running_cpu_sec = 0.0
         self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
 
         snapshot = self._get_snapshot()
@@ -207,7 +203,7 @@ class VahidiniaEnv(gym.Env):
         return obs
 
     # ------------------------------------------------------------------
-    # Reward: -cold_ratio + weight * memory_efficiency
+    # Reward: -cold_ratio - weight * mem_per_request
     # ------------------------------------------------------------------
 
     def _compute_reward(self, snapshot: dict, action: np.ndarray) -> float:
@@ -236,33 +232,23 @@ class VahidiniaEnv(gym.Env):
         cold_ratio = d_cold / max(d_total, 1.0)
         drop_ratio = d_dropped / max(d_total, 1.0)
 
-        # Memory efficiency from resource-seconds (running vs total)
+        # Resource-seconds for per-request cost
         total_mem_sec = float(snapshot.get("lifecycle.total_memory_seconds", 0.0))
-        running_mem_sec = float(snapshot.get("lifecycle.running_memory_seconds", 0.0))
         total_cpu_sec = float(snapshot.get("lifecycle.total_cpu_seconds", 0.0))
-        running_cpu_sec = float(snapshot.get("lifecycle.running_cpu_seconds", 0.0))
 
         d_total_mem = total_mem_sec - self._prev_total_mem_sec
-        d_running_mem = running_mem_sec - self._prev_running_mem_sec
         d_total_cpu = total_cpu_sec - self._prev_total_cpu_sec
-        d_running_cpu = running_cpu_sec - self._prev_running_cpu_sec
         self._prev_total_mem_sec = total_mem_sec
-        self._prev_running_mem_sec = running_mem_sec
         self._prev_total_cpu_sec = total_cpu_sec
-        self._prev_running_cpu_sec = running_cpu_sec
 
-        memory_efficiency = (d_running_mem / d_total_mem) if d_total_mem > 0 else 0.0
-        cpu_efficiency = (d_running_cpu / d_total_cpu) if d_total_cpu > 0 else 0.0
         mem_per_req = (d_total_mem / d_completed) if d_completed > 0 else 0.0
         cpu_per_req = (d_total_cpu / d_completed) if d_completed > 0 else 0.0
 
-        reward = -cold_ratio + self.memory_penalty_weight * memory_efficiency
+        reward = -cold_ratio - self.memory_penalty_weight * mem_per_req
 
         self._last_reward_components = {
             "cold_start_ratio": cold_ratio,
             "drop_ratio": drop_ratio,
-            "memory_efficiency": memory_efficiency,
-            "cpu_efficiency": cpu_efficiency,
             "latency_mean": step_latency_mean,
             "mem_per_request": mem_per_req,
             "cpu_per_request": cpu_per_req,
