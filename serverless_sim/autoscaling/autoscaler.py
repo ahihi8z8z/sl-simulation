@@ -408,16 +408,18 @@ class OpenWhiskPoolAutoscaler:
     # ------------------------------------------------------------------
 
     def _evict_excess_pool(self, service_id: str, state: str) -> None:
-        """Evict excess idle pool containers at *state* when target decreases."""
+        """Evict excess pool containers at *state* when target decreases.
+
+        Evicts all excess containers (idle or not) to prevent accumulation.
+        """
         target = self._pool_targets.get(service_id, {}).get(state, 0)
         lm = self.ctx.lifecycle_manager
 
         if self.pool_mode == "global":
-            # Count globally, evict oldest across all nodes
             all_at_state = [
                 i for node in self.ctx.cluster_manager.get_enabled_nodes()
                 for i in lm.get_instances_for_node(node.node_id)
-                if i.service_id == service_id and i.state == state and i.is_idle
+                if i.service_id == service_id and i.state == state
             ]
             excess = len(all_at_state) - target
             if excess > 0:
@@ -428,7 +430,7 @@ class OpenWhiskPoolAutoscaler:
             for node in self.ctx.cluster_manager.get_enabled_nodes():
                 at_state = [
                     i for i in lm.get_instances_for_node(node.node_id)
-                    if i.service_id == service_id and i.state == state and i.is_idle
+                    if i.service_id == service_id and i.state == state
                 ]
                 excess = len(at_state) - target
                 if excess <= 0:
