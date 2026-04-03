@@ -77,9 +77,12 @@ class VahidiniaEnv(gym.Env):
         self._prev_cold_starts = 0.0
         self._prev_total = 0.0
         self._prev_completed = 0.0
+        self._prev_dropped = 0.0
         self._prev_latency_sum = 0.0
         self._prev_total_mem_sec = 0.0
         self._prev_running_mem_sec = 0.0
+        self._prev_total_cpu_sec = 0.0
+        self._prev_running_cpu_sec = 0.0
         self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
 
         # Build once to determine spaces
@@ -139,9 +142,12 @@ class VahidiniaEnv(gym.Env):
         self._prev_cold_starts = 0.0
         self._prev_total = 0.0
         self._prev_completed = 0.0
+        self._prev_dropped = 0.0
         self._prev_latency_sum = 0.0
         self._prev_total_mem_sec = 0.0
         self._prev_running_mem_sec = 0.0
+        self._prev_total_cpu_sec = 0.0
+        self._prev_running_cpu_sec = 0.0
         self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
 
         snapshot = self._get_snapshot()
@@ -208,12 +214,14 @@ class VahidiniaEnv(gym.Env):
         cold_starts = float(snapshot.get("request.cold_starts", 0.0))
         total = float(snapshot.get("request.total", 0.0))
         completed = float(snapshot.get("request.completed", 0.0))
+        dropped = float(snapshot.get("request.dropped", 0.0))
         latency_mean = float(snapshot.get("request.latency_mean", 0.0))
 
         # Deltas since last step
         d_cold = cold_starts - self._prev_cold_starts
         d_total = total - self._prev_total
         d_completed = completed - self._prev_completed
+        d_dropped = dropped - self._prev_dropped
         latency_sum_now = latency_mean * completed
         d_latency_sum = latency_sum_now - self._prev_latency_sum
         step_latency_mean = (d_latency_sum / d_completed) if d_completed > 0 else 0.0
@@ -221,32 +229,47 @@ class VahidiniaEnv(gym.Env):
         self._prev_cold_starts = cold_starts
         self._prev_total = total
         self._prev_completed = completed
+        self._prev_dropped = dropped
         self._prev_latency_sum = latency_sum_now
 
-        # Cold-start ratio penalty
+        # Ratios
         cold_ratio = d_cold / max(d_total, 1.0)
+        drop_ratio = d_dropped / max(d_total, 1.0)
 
         # Memory efficiency from resource-seconds (running vs total)
         total_mem_sec = float(snapshot.get("lifecycle.total_memory_seconds", 0.0))
         running_mem_sec = float(snapshot.get("lifecycle.running_memory_seconds", 0.0))
+        total_cpu_sec = float(snapshot.get("lifecycle.total_cpu_seconds", 0.0))
+        running_cpu_sec = float(snapshot.get("lifecycle.running_cpu_seconds", 0.0))
 
         d_total_mem = total_mem_sec - self._prev_total_mem_sec
         d_running_mem = running_mem_sec - self._prev_running_mem_sec
+        d_total_cpu = total_cpu_sec - self._prev_total_cpu_sec
+        d_running_cpu = running_cpu_sec - self._prev_running_cpu_sec
         self._prev_total_mem_sec = total_mem_sec
         self._prev_running_mem_sec = running_mem_sec
+        self._prev_total_cpu_sec = total_cpu_sec
+        self._prev_running_cpu_sec = running_cpu_sec
 
-        # Efficiency: fraction of memory-seconds used for running
-        # 0.0 = all memory wasted, 1.0 = perfectly efficient
         memory_efficiency = (d_running_mem / d_total_mem) if d_total_mem > 0 else 0.0
+        cpu_efficiency = (d_running_cpu / d_total_cpu) if d_total_cpu > 0 else 0.0
+        mem_per_req = (d_total_mem / d_completed) if d_completed > 0 else 0.0
+        cpu_per_req = (d_total_cpu / d_completed) if d_completed > 0 else 0.0
 
         reward = -cold_ratio + self.memory_penalty_weight * memory_efficiency
 
         self._last_reward_components = {
             "cold_start_ratio": cold_ratio,
+            "drop_ratio": drop_ratio,
             "memory_efficiency": memory_efficiency,
+            "cpu_efficiency": cpu_efficiency,
             "latency_mean": step_latency_mean,
-            "d_cold": d_cold,
+            "mem_per_request": mem_per_req,
+            "cpu_per_request": cpu_per_req,
             "d_total": d_total,
+            "d_completed": d_completed,
+            "d_cold": d_cold,
+            "d_dropped": d_dropped,
         }
 
         return float(reward)
