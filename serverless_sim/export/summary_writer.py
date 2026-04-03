@@ -133,9 +133,12 @@ class SummaryWriter:
                         running_cpu += time_in_state * inst.allocated_cpu
                         running_mem += time_in_state * inst.allocated_memory
 
+        completed = self.ctx.request_table.counters.completed
         return {
             "cpu_effective_ratio": round(running_cpu / total_cpu, 4) if total_cpu > 0 else 0.0,
             "memory_effective_ratio": round(running_mem / total_mem, 4) if total_mem > 0 else 0.0,
+            "cpu_per_request": round(total_cpu / completed, 4) if completed > 0 else 0.0,
+            "memory_per_request": round(total_mem / completed, 4) if completed > 0 else 0.0,
             "total_cpu_seconds": round(total_cpu, 2),
             "running_cpu_seconds": round(running_cpu, 2),
             "total_memory_seconds": round(total_mem, 2),

@@ -163,9 +163,9 @@ def _save_results_csv(results: dict, path: str) -> None:
 
 def _print_table(results: dict) -> None:
     """Print summary table."""
-    print(f"\n{'='*90}")
-    print(f"{'Experiment':<25} {'Total':>8} {'Done':>8} {'Drop':>8} {'Cold':>8} {'CPU eff':>10} {'Mem eff':>10}")
-    print(f"{'-'*90}")
+    print(f"\n{'='*120}")
+    print(f"{'Experiment':<25} {'Total':>8} {'Done':>8} {'Drop':>8} {'Cold':>8} {'CPU eff':>10} {'Mem eff':>10} {'CPU/req':>10} {'Mem/req':>10}")
+    print(f"{'-'*120}")
     for name, summary in sorted(results.items()):
         if "error" in summary:
             print(f"{name:<25} ERROR: {summary['error']}")
@@ -178,8 +178,10 @@ def _print_table(results: dict) -> None:
               f"{req.get('dropped', 0):>8} "
               f"{req.get('cold_starts', 0):>8} "
               f"{ratio.get('cpu_effective_ratio', 0):>10.4f} "
-              f"{ratio.get('memory_effective_ratio', 0):>10.4f}")
-    print(f"{'='*90}")
+              f"{ratio.get('memory_effective_ratio', 0):>10.4f} "
+              f"{ratio.get('cpu_per_request', 0):>10.4f} "
+              f"{ratio.get('memory_per_request', 0):>10.4f}")
+    print(f"{'='*120}")
 
 
 def main():

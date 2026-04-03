@@ -103,12 +103,18 @@ class RewardCalculator:
             + self.cpu_efficiency_reward * cpu_eff
         )
 
+        # Resource per request: total_resource_seconds / completed_requests
+        mem_per_req = (d_total_mem / d_completed) if d_completed > 0 else 0.0
+        cpu_per_req = (d_total_cpu / d_completed) if d_completed > 0 else 0.0
+
         self.last_components = {
             "drop_ratio": drop_ratio,
             "cold_start_ratio": cold_ratio,
             "memory_efficiency": mem_eff,
             "cpu_efficiency": cpu_eff,
             "latency_mean": step_latency_mean,
+            "mem_per_request": mem_per_req,
+            "cpu_per_request": cpu_per_req,
             "d_total": d_total,
             "d_completed": d_completed,
             "d_cold": d_cold,
