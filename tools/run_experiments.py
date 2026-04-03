@@ -166,7 +166,7 @@ def _print_table(results: dict) -> None:
     print(f"\n{'='*90}")
     print(f"{'Experiment':<25} {'Total':>8} {'Done':>8} {'Drop':>8} {'Cold':>8} {'CPU eff':>10} {'Mem eff':>10}")
     print(f"{'-'*90}")
-    for name, summary in results.items():
+    for name, summary in sorted(results.items()):
         if "error" in summary:
             print(f"{name:<25} ERROR: {summary['error']}")
             continue
