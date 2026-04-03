@@ -179,6 +179,47 @@ class MultiDiscreteEnv(gym.Env):
             "reward_components": self._reward_calc.last_components,
         }
 
+    def action_masks(self) -> np.ndarray:
+        """Return valid action mask for each dimension.
+
+        For MultiDiscrete: concatenated boolean arrays, one per dimension.
+        For flattened Discrete: single boolean array of size n_actions.
+
+        Masks pool_target values that exceed available memory on the cluster.
+        All idle_timeout values are always valid.
+        """
+        ctx = self._engine.ctx
+        mapper = self._action_mapper
+
+        # Calculate max containers cluster can hold
+        nodes = ctx.cluster_manager.get_enabled_nodes()
+        total_available_mem = sum(n.available.memory for n in nodes)
+
+        masks = []
+        for i, (svc_id, action_type, state) in enumerate(mapper._action_map):
+            dim_size = mapper.dimensions[i]
+
+            if action_type == "idle_timeout":
+                # All idle_timeout values valid
+                masks.append(np.ones(dim_size, dtype=bool))
+            else:
+                # pool_target: mask values exceeding available memory
+                service = ctx.workload_manager.services[svc_id]
+                mem_per_container = service.peak_memory
+                max_affordable = int(total_available_mem / mem_per_container) if mem_per_container > 0 else dim_size
+                mask = np.zeros(dim_size, dtype=bool)
+                mask[:min(max_affordable + 1, dim_size)] = True
+                masks.append(mask)
+
+        if self.flatten_action:
+            # Flatten: cartesian product of per-dimension masks
+            flat_mask = masks[0]
+            for m in masks[1:]:
+                flat_mask = np.outer(flat_mask, m).flatten()
+            return flat_mask.astype(bool)
+        else:
+            return np.concatenate(masks)
+
     def _get_snapshot(self) -> dict:
         self._engine.ctx.monitor_manager.collect_once()
         return self._monitor_api.get_snapshot()

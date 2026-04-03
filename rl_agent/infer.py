@@ -7,10 +7,11 @@ import os
 
 import numpy as np
 from stable_baselines3 import PPO, A2C, DQN
+from sb3_contrib import MaskablePPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 
-ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN}
+ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "maskable_ppo": MaskablePPO}
 
 
 def run_inference(
@@ -84,8 +85,14 @@ def run_inference(
         episode_reward = 0.0
         step_count = 0
 
+        use_masks = algo_name == "maskable_ppo" and hasattr(env, "action_masks")
+
         while True:
-            action, _ = model.predict(obs, deterministic=deterministic)
+            if use_masks:
+                action, _ = model.predict(obs, deterministic=deterministic,
+                                          action_masks=env.action_masks())
+            else:
+                action, _ = model.predict(obs, deterministic=deterministic)
             if has_vec_norm:
                 obs, reward, done, info = vec_env.step(action)
                 episode_reward += reward[0]
