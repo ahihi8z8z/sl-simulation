@@ -45,6 +45,9 @@ class ContainerInstance:
         self.allocated_cpu: float = 0.0
         self.allocated_memory: float = 0.0
 
+        # Eviction flag — checked by in-flight _cold_start processes
+        self.evicted: bool = False
+
     @property
     def is_idle(self) -> bool:
         return self.active_requests == 0

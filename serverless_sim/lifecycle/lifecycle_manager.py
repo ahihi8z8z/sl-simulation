@@ -202,6 +202,7 @@ class LifecycleManager:
             node_id=node.node_id,
             max_concurrency=service.max_concurrency,
         )
+        inst.target_state = target_state  # Set immediately for eviction matching
         self._get_instances(node.node_id).append(inst)
 
         # Allocate null state resources (typically 0)
@@ -222,6 +223,10 @@ class LifecycleManager:
             from_state = path[i]
             to_state = path[i + 1]
 
+            # Check if evicted while in-flight
+            if inst.evicted:
+                return inst
+
             inst.state = from_state
             inst.target_state = to_state
             inst.state_entered_at = self.ctx.env.now
@@ -235,6 +240,12 @@ class LifecycleManager:
 
             if sample.time > 0:
                 yield self.ctx.env.timeout(sample.time)
+
+            # Re-check after yield — may have been evicted during wait
+            if inst.evicted:
+                if sample.cpu > 0 or sample.memory > 0:
+                    node.release(trans_res)
+                return inst
 
             if sample.cpu > 0 or sample.memory > 0:
                 node.release(trans_res)
@@ -325,7 +336,8 @@ class LifecycleManager:
     # ------------------------------------------------------------------
 
     def evict_instance(self, instance: ContainerInstance) -> None:
-        """Evict an idle instance, releasing state resources and removing it."""
+        """Evict instance, releasing state resources and removing it."""
+        instance.evicted = True
         if instance.active_requests > 0:
             return
 

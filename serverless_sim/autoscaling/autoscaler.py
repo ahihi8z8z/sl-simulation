@@ -408,35 +408,47 @@ class OpenWhiskPoolAutoscaler:
     # ------------------------------------------------------------------
 
     def _evict_excess_pool(self, service_id: str, state: str) -> None:
-        """Evict excess pool containers at *state* when target decreases.
+        """Evict excess pool containers at/heading-to *state* when target decreases.
 
-        Evicts all excess containers (idle or not) to prevent accumulation.
+        Matches containers currently at the state OR transitioning towards it
+        (target_state == state) to prevent accumulation from in-flight promotions.
         """
         target = self._pool_targets.get(service_id, {}).get(state, 0)
         lm = self.ctx.lifecycle_manager
 
+        def _matches(inst):
+            if inst.service_id != service_id:
+                return False
+            # Already at target state
+            if inst.state == state:
+                return True
+            # In-flight: being promoted towards target state
+            if inst.target_state == state:
+                return True
+            return False
+
         if self.pool_mode == "global":
-            all_at_state = [
+            candidates = [
                 i for node in self.ctx.cluster_manager.get_enabled_nodes()
                 for i in lm.get_instances_for_node(node.node_id)
-                if i.service_id == service_id and i.state == state
+                if _matches(i)
             ]
-            excess = len(all_at_state) - target
+            excess = len(candidates) - target
             if excess > 0:
-                all_at_state.sort(key=lambda i: i.created_at)
-                for inst in all_at_state[:excess]:
+                candidates.sort(key=lambda i: i.created_at)
+                for inst in candidates[:excess]:
                     lm.evict_instance(inst)
         else:
             for node in self.ctx.cluster_manager.get_enabled_nodes():
-                at_state = [
+                candidates = [
                     i for i in lm.get_instances_for_node(node.node_id)
-                    if i.service_id == service_id and i.state == state
+                    if _matches(i)
                 ]
-                excess = len(at_state) - target
+                excess = len(candidates) - target
                 if excess <= 0:
                     continue
-                at_state.sort(key=lambda i: i.created_at)
-                for inst in at_state[:excess]:
+                candidates.sort(key=lambda i: i.created_at)
+                for inst in candidates[:excess]:
                     lm.evict_instance(inst)
 
     def _evict_excess_warm(self, service_id: str) -> None:
