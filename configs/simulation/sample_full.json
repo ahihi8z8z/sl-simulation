@@ -81,14 +81,12 @@
       {
         "node_id": "node-0",
         "cpu_capacity": 16.0,
-        "memory_capacity": 32768,
-        "max_queue_depth": 200
+        "memory_capacity": 32768
       },
       {
         "node_id": "node-1",
         "cpu_capacity": 8.0,
-        "memory_capacity": 16384,
-        "max_queue_depth": 100
+        "memory_capacity": 16384
       }
     ]
   },
