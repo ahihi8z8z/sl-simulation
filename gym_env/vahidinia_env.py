@@ -6,7 +6,7 @@ Two-layer approach to mitigate cold start in serverless computing:
 
 State space : [inter_arrival_time, last_cold_start] per service
 Action space: continuous idle-container window value in [min, max] seconds
-Reward      : -(cold_starts / total_invocations) - weight * mem_per_request
+Reward      : -(cold_starts / total_invocations) - weight * mem_utilization
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ class VahidiniaEnv(gym.Env):
         self.idle_timeout_max = self.gym_config.get("idle_timeout_max", 900.0)
 
         # Reward config
-        self.memory_penalty_weight = self.gym_config.get("memory_penalty_weight", 0.001)
+        self.mem_utilization_penalty = self.gym_config.get("mem_utilization_penalty", 0.5)
 
         # Internal state
         self._engine: SimulationEngine | None = None
@@ -128,6 +128,10 @@ class VahidiniaEnv(gym.Env):
             self._autoscaling_api = AutoscalingAPI(ctx.autoscaling_manager)
 
         self._service_ids = list(ctx.workload_manager.services.keys())
+
+        nodes = ctx.cluster_manager.get_enabled_nodes()
+        self._cluster_memory = sum(n.capacity.memory for n in nodes)
+        self._cluster_cpu = sum(n.capacity.cpu for n in nodes)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -203,7 +207,7 @@ class VahidiniaEnv(gym.Env):
         return obs
 
     # ------------------------------------------------------------------
-    # Reward: -cold_ratio - weight * mem_per_request
+    # Reward: -cold_ratio - weight * mem_utilization
     # ------------------------------------------------------------------
 
     def _compute_reward(self, snapshot: dict, action: np.ndarray) -> float:
@@ -241,14 +245,23 @@ class VahidiniaEnv(gym.Env):
         self._prev_total_mem_sec = total_mem_sec
         self._prev_total_cpu_sec = total_cpu_sec
 
+        # Resource utilization (0 = idle, 1 = full cluster)
+        max_mem_sec = self.step_duration * self._cluster_memory
+        max_cpu_sec = self.step_duration * self._cluster_cpu
+        mem_util = (d_total_mem / max_mem_sec) if max_mem_sec > 0 else 0.0
+        cpu_util = (d_total_cpu / max_cpu_sec) if max_cpu_sec > 0 else 0.0
+
+        # Resource per request (for logging)
         mem_per_req = (d_total_mem / d_completed) if d_completed > 0 else 0.0
         cpu_per_req = (d_total_cpu / d_completed) if d_completed > 0 else 0.0
 
-        reward = -cold_ratio - self.memory_penalty_weight * mem_per_req
+        reward = -cold_ratio - self.mem_utilization_penalty * mem_util
 
         self._last_reward_components = {
             "cold_start_ratio": cold_ratio,
             "drop_ratio": drop_ratio,
+            "mem_utilization": mem_util,
+            "cpu_utilization": cpu_util,
             "latency_mean": step_latency_mean,
             "mem_per_request": mem_per_req,
             "cpu_per_request": cpu_per_req,

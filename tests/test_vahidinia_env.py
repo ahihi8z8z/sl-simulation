@@ -49,13 +49,13 @@ class TestVahidiniaEnv:
         env.close()
 
     def test_reward_is_bounded(self):
-        """Reward should be bounded: [-1, weight]."""
+        """Reward should be bounded: [-(1 + weight), 0]."""
         env = VahidiniaEnv(SIM_CONFIG)
         env.reset()
         for _ in range(10):
             _, reward, terminated, truncated, _ = env.step(env.action_space.sample())
-            assert reward >= -1.0
-            assert reward <= env.memory_penalty_weight
+            assert reward >= -(1.0 + env.mem_utilization_penalty)
+            assert reward <= 0.0
             if terminated or truncated:
                 break
         env.close()
@@ -91,7 +91,7 @@ class TestVahidiniaEnv:
             "max_steps": 10,
             "idle_timeout_min": 60.0,
             "idle_timeout_max": 300.0,
-            "memory_penalty_weight": 0.05,
+            "mem_utilization_penalty": 0.05,
         }
         tmp = tempfile.mktemp(suffix=".json")
         with open(tmp, "w") as f:
@@ -101,7 +101,7 @@ class TestVahidiniaEnv:
             assert env.max_steps == 10
             assert env.idle_timeout_min == 60.0
             assert env.idle_timeout_max == 300.0
-            assert env.memory_penalty_weight == 0.05
+            assert env.mem_utilization_penalty == 0.05
             assert env.action_space.low[0] == 60.0
             assert env.action_space.high[0] == 300.0
             env.close()

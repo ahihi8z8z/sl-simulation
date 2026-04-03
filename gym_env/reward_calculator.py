@@ -2,23 +2,29 @@ from __future__ import annotations
 
 
 class RewardCalculator:
-    """Computes reward from ratios and resource-per-request metrics.
+    """Computes reward from ratios and resource utilization metrics.
 
     Reward = -w_drop * drop_ratio
            - w_cold * cold_start_ratio
-           - w_mem  * mem_per_request
-           - w_cpu  * cpu_per_request
+           - w_mem  * mem_utilization
+           - w_cpu  * cpu_utilization
 
-    All weights are positive. Penalties: lower resource usage = higher reward.
+    All weights positive. All components in [0, 1].
+    mem/cpu_utilization = avg resource used / total cluster capacity.
     """
 
     def __init__(
         self,
         drop_penalty: float = 1.0,
         cold_start_penalty: float = 1.0,
-        mem_per_request_penalty: float = 0.001,
-        cpu_per_request_penalty: float = 0.01,
+        mem_utilization_penalty: float = 0.5,
+        cpu_utilization_penalty: float = 0.5,
+        step_duration: float = 3600.0,
+        cluster_memory: float = 16384.0,
+        cluster_cpu: float = 16.0,
         # Backward-compat: ignored
+        mem_per_request_penalty: float = 0.0,
+        cpu_per_request_penalty: float = 0.0,
         memory_efficiency_reward: float = 0.0,
         cpu_efficiency_reward: float = 0.0,
         latency_penalty: float = 0.0,
@@ -27,10 +33,12 @@ class RewardCalculator:
     ):
         self.drop_penalty = abs(drop_penalty)
         self.cold_start_penalty = abs(cold_start_penalty)
-        self.mem_per_request_penalty = abs(mem_per_request_penalty)
-        self.cpu_per_request_penalty = abs(cpu_per_request_penalty)
+        self.mem_utilization_penalty = abs(mem_utilization_penalty)
+        self.cpu_utilization_penalty = abs(cpu_utilization_penalty)
+        self.step_duration = step_duration
+        self.cluster_memory = cluster_memory
+        self.cluster_cpu = cluster_cpu
 
-        # Previous cumulative values for computing deltas
         self._prev_total = 0.0
         self._prev_completed = 0.0
         self._prev_dropped = 0.0
@@ -64,7 +72,6 @@ class RewardCalculator:
         d_dropped = dropped - self._prev_dropped
         d_cold = cold_starts - self._prev_cold_starts
 
-        # Per-step latency
         latency_sum_now = latency_mean * completed
         d_latency_sum = latency_sum_now - self._prev_latency_sum
         step_latency_mean = (d_latency_sum / d_completed) if d_completed > 0 else 0.0
@@ -80,24 +87,32 @@ class RewardCalculator:
         self._prev_total_mem_sec = total_mem_sec
         self._prev_total_cpu_sec = total_cpu_sec
 
-        # Ratios
+        # Ratios (0 = good, 1 = bad)
         drop_ratio = d_dropped / max(d_total, 1.0)
         cold_ratio = d_cold / max(d_total, 1.0)
 
-        # Resource per request
+        # Resource utilization (0 = idle, 1 = full cluster)
+        max_mem_sec = self.step_duration * self.cluster_memory
+        max_cpu_sec = self.step_duration * self.cluster_cpu
+        mem_util = (d_total_mem / max_mem_sec) if max_mem_sec > 0 else 0.0
+        cpu_util = (d_total_cpu / max_cpu_sec) if max_cpu_sec > 0 else 0.0
+
+        # Resource per request (for logging)
         mem_per_req = (d_total_mem / d_completed) if d_completed > 0 else 0.0
         cpu_per_req = (d_total_cpu / d_completed) if d_completed > 0 else 0.0
 
         reward = (
             - self.drop_penalty * drop_ratio
             - self.cold_start_penalty * cold_ratio
-            - self.mem_per_request_penalty * mem_per_req
-            - self.cpu_per_request_penalty * cpu_per_req
+            - self.mem_utilization_penalty * mem_util
+            - self.cpu_utilization_penalty * cpu_util
         )
 
         self.last_components = {
             "drop_ratio": drop_ratio,
             "cold_start_ratio": cold_ratio,
+            "mem_utilization": mem_util,
+            "cpu_utilization": cpu_util,
             "latency_mean": step_latency_mean,
             "mem_per_request": mem_per_req,
             "cpu_per_request": cpu_per_req,
