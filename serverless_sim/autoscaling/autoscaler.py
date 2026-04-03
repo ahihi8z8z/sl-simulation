@@ -180,7 +180,7 @@ class OpenWhiskPoolAutoscaler:
                 lm.prepare_instance_for_service(node, service_id, target_state="warm")
                 created += 1
 
-        pool_states = self._get_pool_states(service_id)
+        pool_states = self._get_pool_states(service_id) + ["warm"]
         for state in pool_states:
             target = self._pool_targets.get(service_id, {}).get(state, 0)
             if target <= 0:
@@ -241,7 +241,7 @@ class OpenWhiskPoolAutoscaler:
             created += 1
 
         # 2. Fill pool_targets (global count across all nodes)
-        pool_states = self._get_pool_states(service_id)
+        pool_states = self._get_pool_states(service_id) + ["warm"]
         for state in pool_states:
             target = self._pool_targets.get(service_id, {}).get(state, 0)
             if target <= 0:
@@ -349,10 +349,11 @@ class OpenWhiskPoolAutoscaler:
         If target decreases, evicts excess pool containers at that state.
         """
         pool_states = self._get_pool_states(service_id)
-        if state not in pool_states:
+        valid_states = set(pool_states) | {"warm"}
+        if state not in valid_states:
             self.logger.warning(
-                "Ignoring pool target for '%s' -- only intermediate states %s are valid",
-                state, pool_states,
+                "Ignoring pool target for '%s' -- only %s are valid",
+                state, sorted(valid_states),
             )
             return
         old = self._pool_targets.get(service_id, {}).get(state, 0)
