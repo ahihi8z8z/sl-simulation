@@ -37,6 +37,9 @@ class AutoscalingAPI:
     def get_all_pool_targets(self, service_id: str) -> dict[str, int]:
         return self._autoscaler.get_all_pool_targets(service_id)
 
+    def batch_set_pool_targets(self, service_id: str, targets: dict[str, int]) -> None:
+        self._autoscaler.batch_set_pool_targets(service_id, targets)
+
     # -- Idle timeout --
 
     def get_idle_timeout(self, service_id: str) -> float:

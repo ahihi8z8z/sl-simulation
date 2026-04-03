@@ -73,9 +73,6 @@ class LifecycleManager:
         for inst in self._get_instances(node.node_id):
             if inst.service_id != service_id:
                 continue
-            # Use active_requests (updated by start/finish_execution) to check
-            # available concurrency; available_slots uses the SimPy resource count
-            # which is only valid inside the node's async dispatch flow.
             has_free_slot = inst.active_requests < inst.max_concurrency
             if not has_free_slot:
                 continue
@@ -93,16 +90,54 @@ class LifecycleManager:
         if not intermediate:
             return None
 
-        for state in reversed(intermediate):
-            for inst in self._get_instances(node.node_id):
-                if (
-                    inst.service_id == service_id
-                    and inst.state == state
+        # Single scan — find deepest state match
+        intermediate_set = set(intermediate)
+        best: ContainerInstance | None = None
+        best_depth = -1
+        for inst in self._get_instances(node.node_id):
+            if (inst.service_id == service_id
+                    and inst.state in intermediate_set
                     and inst.target_state is None
-                    and inst.is_idle
-                ):
-                    return inst
-        return None
+                    and inst.is_idle):
+                depth = intermediate.index(inst.state)
+                if depth > best_depth:
+                    best = inst
+                    best_depth = depth
+        return best
+
+    def find_reusable_or_promotable(self, node: Node, service_id: str
+                                     ) -> tuple[ContainerInstance | None, ContainerInstance | None]:
+        """Single-scan combined search for reusable and promotable instances."""
+        sm = self._get_sm(service_id)
+        chain = sm.get_cold_start_path()
+        intermediate = chain[1:-1]
+        intermediate_set = set(intermediate)
+
+        reusable: ContainerInstance | None = None
+        running_candidate: ContainerInstance | None = None
+        promotable: ContainerInstance | None = None
+        best_depth = -1
+
+        for inst in self._get_instances(node.node_id):
+            if inst.service_id != service_id:
+                continue
+            # Reusable check
+            if inst.active_requests < inst.max_concurrency:
+                if inst.state == "warm":
+                    reusable = inst
+                    break  # Best possible — stop early
+                if inst.state == "running" and running_candidate is None:
+                    running_candidate = inst
+            # Promotable check
+            if (inst.state in intermediate_set
+                    and inst.target_state is None
+                    and inst.is_idle):
+                depth = intermediate.index(inst.state)
+                if depth > best_depth:
+                    promotable = inst
+                    best_depth = depth
+
+        return (reusable or running_candidate, promotable)
 
     def promote_instance(
         self, node: Node, instance: ContainerInstance,

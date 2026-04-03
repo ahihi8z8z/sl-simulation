@@ -89,10 +89,16 @@ class MultiActionMapper:
         else:
             action = np.asarray(action).flatten()
 
+        # Batch: collect all pool_target changes, apply once
+        pool_updates = {}  # {svc_id: {state: value}}
         for i, (svc_id, action_type, state) in enumerate(self._action_map):
             value = int(action[i]) if i < len(action) else 0
 
             if action_type == "pool_target":
-                api.set_pool_target(svc_id, state, value)
+                pool_updates.setdefault(svc_id, {})[state] = value
             elif action_type == "idle_timeout":
-                api.set_idle_timeout(svc_id, value * 60.0)  # minutes → seconds
+                api.set_idle_timeout(svc_id, value * 60.0)
+
+        # Apply pool targets in batch (single fill per service)
+        for svc_id, targets in pool_updates.items():
+            api.batch_set_pool_targets(svc_id, targets)

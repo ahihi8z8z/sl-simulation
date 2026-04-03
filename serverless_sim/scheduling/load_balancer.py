@@ -49,14 +49,11 @@ class BaseLoadBalancer:
         2. Has a promotable intermediate container
         3. Has enough memory to create a new container (and max_instances not exceeded)
         """
-        # Check warm/reusable container
+        # Single-scan check for warm/reusable or promotable container
         if self.ctx.lifecycle_manager:
-            inst = self.ctx.lifecycle_manager.find_reusable_instance(node, invocation.service_id)
-            if inst is not None:
-                return True
-            # Check promotable intermediate instance
-            prom = self.ctx.lifecycle_manager.find_promotable_instance(node, invocation.service_id)
-            if prom is not None:
+            reusable, promotable = self.ctx.lifecycle_manager.find_reusable_or_promotable(
+                node, invocation.service_id)
+            if reusable is not None or promotable is not None:
                 return True
         # Check max_instances
         if self.ctx.autoscaling_manager:

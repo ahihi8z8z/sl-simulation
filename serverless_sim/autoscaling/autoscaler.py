@@ -367,6 +367,38 @@ class OpenWhiskPoolAutoscaler:
                 for node in self.ctx.cluster_manager.get_enabled_nodes():
                     self.notify_pool_change(node.node_id, service_id)
 
+    def batch_set_pool_targets(self, service_id: str, targets: dict[str, int]) -> None:
+        """Set multiple pool targets at once, then fill/evict once.
+
+        Much faster than calling set_pool_target() per state.
+        """
+        need_fill = False
+        need_evict_states = []
+
+        for state, count in targets.items():
+            pool_states = self._get_pool_states(service_id)
+            valid_states = set(pool_states) | {"warm"}
+            if state not in valid_states:
+                continue
+            old = self._pool_targets.get(service_id, {}).get(state, 0)
+            self._pool_targets.setdefault(service_id, {})[state] = count
+            if count > old:
+                need_fill = True
+            elif count < old:
+                need_evict_states.append(state)
+
+        # Evict excess (per state)
+        for state in need_evict_states:
+            self._evict_excess_pool(service_id, state)
+
+        # Fill once for all increased targets
+        if need_fill:
+            if self.pool_mode == "global":
+                self._fill_pool_global(service_id)
+            else:
+                for node in self.ctx.cluster_manager.get_enabled_nodes():
+                    self.notify_pool_change(node.node_id, service_id)
+
     def get_all_pool_targets(self, service_id: str) -> dict[str, int]:
         """Get all pool targets for a service."""
         return dict(self._pool_targets.get(service_id, {}))
