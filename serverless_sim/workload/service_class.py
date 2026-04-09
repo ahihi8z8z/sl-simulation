@@ -20,6 +20,11 @@ class ServiceClass:
     min_instances: int = 0
     max_instances: int = 0  # 0 = unlimited
 
+    # Resource request per container (for capacity checks)
+    # If set, used instead of peak_memory/peak_cpu for scheduling decisions
+    request_cpu: float = 0.0
+    request_memory: float = 0.0
+
     # Per-service lifecycle (set after construction via build_lifecycle)
     _state_machine: OpenWhiskExtendedStateMachine | None = field(
         default=None, repr=False, compare=False,
@@ -38,13 +43,17 @@ class ServiceClass:
 
     @property
     def peak_memory(self) -> float:
-        """Max memory across all states (for LoadBalancer capacity check)."""
+        """Memory for capacity checks. Uses request_memory if set, else max across states."""
+        if self.request_memory > 0:
+            return self.request_memory
         sm = self.state_machine
         return max(sd.memory for sd in sm.states.values())
 
     @property
     def peak_cpu(self) -> float:
-        """Max CPU across all states."""
+        """CPU for capacity checks. Uses request_cpu if set, else max across states."""
+        if self.request_cpu > 0:
+            return self.request_cpu
         sm = self.state_machine
         return max(sd.cpu for sd in sm.states.values())
 
@@ -62,6 +71,8 @@ class ServiceClass:
             max_concurrency=cfg["max_concurrency"],
             min_instances=cfg.get("min_instances", 0),
             max_instances=cfg.get("max_instances", 0),
+            request_cpu=cfg.get("request_cpu", 0.0),
+            request_memory=cfg.get("request_memory", 0.0),
         )
 
         # Build per-service lifecycle
