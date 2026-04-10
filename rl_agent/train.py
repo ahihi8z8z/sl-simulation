@@ -10,7 +10,7 @@ from stable_baselines3 import PPO, A2C, DQN
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
-from sb3_contrib import MaskablePPO
+from sb3_contrib import MaskablePPO, RecurrentPPO
 
 
 class CheckpointWithNormalize(BaseCallback):
@@ -74,7 +74,7 @@ class RewardComponentLogger(BaseCallback):
         self._buffer.clear()
 
 
-ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "maskable_ppo": MaskablePPO}
+ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "maskable_ppo": MaskablePPO, "recurrent_ppo": RecurrentPPO}
 
 
 def _make_env(env_class, sim_config_path: str, gym_config_path: str, seed: int):
@@ -160,7 +160,7 @@ def run_training(
         model_kwargs["policy_kwargs"] = policy_kwargs
 
     # On-policy params (PPO, A2C, MaskablePPO)
-    if algo_name in ("ppo", "a2c", "maskable_ppo"):
+    if algo_name in ("ppo", "a2c", "maskable_ppo", "recurrent_ppo"):
         model_kwargs["n_steps"] = rl_config.get("n_steps", 128)
         model_kwargs["gae_lambda"] = rl_config.get("gae_lambda", 0.95)
         model_kwargs["ent_coef"] = rl_config.get("ent_coef", 0.0)
@@ -168,7 +168,7 @@ def run_training(
         model_kwargs["normalize_advantage"] = rl_config.get("normalize_advantages", True)
 
     # PPO-specific params (PPO and MaskablePPO)
-    if algo_name in ("ppo", "maskable_ppo"):
+    if algo_name in ("ppo", "maskable_ppo", "recurrent_ppo"):
         model_kwargs["batch_size"] = rl_config.get("batch_size", 64)
         model_kwargs["n_epochs"] = rl_config.get("n_epochs", 10)
         model_kwargs["clip_range"] = rl_config.get("clip_range", 0.2)
