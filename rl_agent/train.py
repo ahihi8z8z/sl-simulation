@@ -141,8 +141,9 @@ def run_training(
         vec_env = VecNormalize(vec_env, norm_obs=normalize_obs, norm_reward=normalize_reward)
 
     # Common SB3 params
+    policy_name = "MlpLstmPolicy" if algo_name == "recurrent_ppo" else "MlpPolicy"
     model_kwargs = dict(
-        policy="MlpPolicy",
+        policy=policy_name,
         env=vec_env,
         learning_rate=rl_config.get("learning_rate", 3e-4),
         gamma=rl_config.get("gamma", 0.99),
