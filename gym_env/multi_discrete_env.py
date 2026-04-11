@@ -60,6 +60,7 @@ class MultiDiscreteEnv(gym.Env):
         self.step_duration = ctrl_cfg.get("interval", 5.0)
         self.max_steps = self.gym_config.get("max_steps", 200)
         self.flatten_action = self.gym_config.get("flatten_action", False)
+        self.continuous_action = self.gym_config.get("continuous_action", False)
 
         self._engine: SimulationEngine | None = None
         self._monitor_api: MonitorAPI | None = None
@@ -80,8 +81,20 @@ class MultiDiscreteEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # Action space: MultiDiscrete or flattened Discrete (for DQN)
-        if self.flatten_action:
+        # Action space
+        if self.continuous_action:
+            # Box: continuous values, round pool_targets on apply
+            highs = []
+            for svc_id, action_type, state in self._action_mapper._action_map:
+                if action_type == "pool_target":
+                    highs.append(float(self._action_mapper.pool_target_max))
+                else:
+                    highs.append(float(self._action_mapper.idle_timeout_max_minutes * 60))  # seconds
+            self.action_space = spaces.Box(
+                low=np.zeros(len(highs), dtype=np.float32),
+                high=np.array(highs, dtype=np.float32),
+            )
+        elif self.flatten_action:
             self.action_space = spaces.Discrete(self._action_mapper.flat_n_actions)
         else:
             self.action_space = spaces.MultiDiscrete(self._action_mapper.dimensions)
@@ -161,7 +174,7 @@ class MultiDiscreteEnv(gym.Env):
         self._current_step += 1
 
         if self._autoscaling_api:
-            self._action_mapper.apply(action, self._autoscaling_api)
+            self._action_mapper.apply(action, self._autoscaling_api, continuous=self.continuous_action)
 
         ctx = self._engine.ctx
         ctx.env.run(until=ctx.env.now + self.step_duration)

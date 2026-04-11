@@ -6,7 +6,7 @@ import json
 import os
 
 import numpy as np
-from stable_baselines3 import PPO, A2C, DQN
+from stable_baselines3 import PPO, A2C, DQN, SAC
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
@@ -74,7 +74,7 @@ class RewardComponentLogger(BaseCallback):
         self._buffer.clear()
 
 
-ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "maskable_ppo": MaskablePPO, "recurrent_ppo": RecurrentPPO}
+ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "sac": SAC, "maskable_ppo": MaskablePPO, "recurrent_ppo": RecurrentPPO}
 
 
 def _make_env(env_class, sim_config_path: str, gym_config_path: str, seed: int):
@@ -183,6 +183,14 @@ def run_training(
         model_kwargs["target_update_interval"] = rl_config.get("target_update_interval", 1000)
         model_kwargs["exploration_fraction"] = rl_config.get("exploration_fraction", 0.1)
         model_kwargs["exploration_final_eps"] = rl_config.get("exploration_final_eps", 0.05)
+
+    # SAC-specific params
+    if algo_name == "sac":
+        model_kwargs["buffer_size"] = rl_config.get("buffer_size", 100000)
+        model_kwargs["batch_size"] = rl_config.get("batch_size", 256)
+        model_kwargs["learning_starts"] = rl_config.get("learning_starts", 1000)
+        model_kwargs["train_freq"] = rl_config.get("train_freq", 1)
+        model_kwargs["ent_coef"] = rl_config.get("ent_coef", "auto")
 
     # Resume from existing model or create new
     resume_path = rl_config.get("resume_model_path", None)

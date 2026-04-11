@@ -79,25 +79,32 @@ class MultiActionMapper:
             flat_action //= self.dimensions[i]
         return action
 
-    def apply(self, action, api: AutoscalingAPI) -> None:
+    def apply(self, action, api: AutoscalingAPI, continuous: bool = False) -> None:
         """Apply action through the autoscaling API.
 
-        Accepts either MultiDiscrete array or flat int (auto-detected).
+        Accepts MultiDiscrete array, flat int, or continuous Box array.
+        If continuous=True, pool_targets are rounded and idle_timeout is in seconds.
         """
         if isinstance(action, (int, np.integer)):
             action = self.unflatten(int(action))
         else:
-            action = np.asarray(action).flatten()
+            action = np.asarray(action, dtype=np.float32).flatten()
 
         # Batch: collect all pool_target changes, apply once
         pool_updates = {}  # {svc_id: {state: value}}
         for i, (svc_id, action_type, state) in enumerate(self._action_map):
-            value = int(action[i]) if i < len(action) else 0
+            raw = float(action[i]) if i < len(action) else 0
 
             if action_type == "pool_target":
+                value = max(0, min(int(round(raw)), self.pool_target_max))
                 pool_updates.setdefault(svc_id, {})[state] = value
             elif action_type == "idle_timeout":
-                api.set_idle_timeout(svc_id, value * 60.0)
+                if continuous:
+                    # Continuous: value is seconds directly
+                    api.set_idle_timeout(svc_id, max(0.0, raw))
+                else:
+                    # Discrete: value is minutes index
+                    api.set_idle_timeout(svc_id, int(raw) * 60.0)
 
         # Apply pool targets in batch (single fill per service)
         for svc_id, targets in pool_updates.items():

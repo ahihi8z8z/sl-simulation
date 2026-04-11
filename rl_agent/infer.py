@@ -6,12 +6,12 @@ import json
 import os
 
 import numpy as np
-from stable_baselines3 import PPO, A2C, DQN
+from stable_baselines3 import PPO, A2C, DQN, SAC
 from sb3_contrib import MaskablePPO, RecurrentPPO
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 
-ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "maskable_ppo": MaskablePPO, "recurrent_ppo": RecurrentPPO}
+ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "sac": SAC, "maskable_ppo": MaskablePPO, "recurrent_ppo": RecurrentPPO}
 
 
 def run_inference(
