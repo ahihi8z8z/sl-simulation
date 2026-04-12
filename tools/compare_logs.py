@@ -146,46 +146,32 @@ def plot_latency_cdf(logs: list[dict], labels: list[str], output_dir: str) -> No
     print(f"  Saved: comparison_cdf.png")
 
 
-def plot_container_stacks(logs: list[dict], labels: list[str], output_dir: str) -> None:
-    """Per-run stacked area chart of container counts by state."""
-    for log, label in zip(logs, labels):
+def plot_container_comparison(logs: list[dict], labels: list[str], output_dir: str) -> None:
+    """Line chart comparing container count over time across all runs."""
+    colors = plt.cm.Set1(np.linspace(0, 1, len(labels)))
+    fig, ax = plt.subplots(figsize=(12, 5))
+
+    for log, label, color in zip(logs, labels, colors):
         metrics = log.get("metrics")
         if metrics is None or len(metrics) == 0:
             continue
 
-        fig, ax = plt.subplots(figsize=(12, 4))
-
         time_hours = metrics["time"] / 3600.0
+        total_col = "lifecycle.instances_total"
+        if total_col in metrics.columns:
+            ax.plot(time_hours, metrics[total_col].fillna(0),
+                    label=label, color=color, linewidth=0.8, alpha=0.8)
 
-        # Try per-state columns first, fallback to total
-        state_cols = [c for c in metrics.columns
-                      if c.startswith("lifecycle.instances_") and c != "lifecycle.instances_total"
-                      and c != "lifecycle.instances_evicted"]
+    ax.set_xlabel("Time (hours)")
+    ax.set_ylabel("Active Containers")
+    ax.set_title("Container Count Comparison")
+    ax.legend(loc="upper right", fontsize=9)
+    ax.grid(alpha=0.3)
 
-        if state_cols:
-            states_data = metrics[state_cols].fillna(0)
-            display_names = [c.replace("lifecycle.instances_", "") for c in state_cols]
-            colors = plt.cm.Set2(np.linspace(0, 1, len(state_cols)))
-            ax.stackplot(time_hours, *[states_data[c].values for c in state_cols],
-                          labels=display_names, colors=colors, alpha=0.8)
-        elif "lifecycle.instances_total" in metrics.columns:
-            ax.fill_between(time_hours, metrics["lifecycle.instances_total"].fillna(0),
-                           alpha=0.6, color="#2196F3", label="total instances")
-        else:
-            plt.close(fig)
-            continue
-
-        ax.set_xlabel("Time (hours)")
-        ax.set_ylabel("Container Count")
-        ax.set_title(f"Container States — {label}")
-        ax.legend(loc="upper right", fontsize=8)
-        ax.grid(axis="y", alpha=0.3)
-
-        plt.tight_layout()
-        safe = label.replace("/", "_").replace(" ", "_")
-        fig.savefig(os.path.join(output_dir, f"containers_{safe}.png"), dpi=150)
-        plt.close(fig)
-        print(f"  Saved: containers_{safe}.png")
+    plt.tight_layout()
+    fig.savefig(os.path.join(output_dir, "comparison_containers.png"), dpi=150)
+    plt.close(fig)
+    print(f"  Saved: comparison_containers.png")
 
 
 def main():
@@ -204,7 +190,7 @@ def main():
     plot_grouped_bar(logs, labels, args.output_dir)
     plot_latency_boxplot(logs, labels, args.output_dir)
     plot_latency_cdf(logs, labels, args.output_dir)
-    plot_container_stacks(logs, labels, args.output_dir)
+    plot_container_comparison(logs, labels, args.output_dir)
     print(f"\nAll plots in {args.output_dir}/")
 
 
