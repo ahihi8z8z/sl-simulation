@@ -58,28 +58,37 @@ class SummaryWriter:
                 "cold_start_rate_pct": round(c.cold_starts / max(c.completed, 1) * 100, 2),
             }
 
-        # --- Cluster resource usage (latest snapshot) ---
-        if self.ctx.monitor_manager:
-            from serverless_sim.monitoring.monitor_api import MonitorAPI
-            api = MonitorAPI(self.ctx.monitor_manager)
-            snapshot = api.get_snapshot()
+        # --- Resource metrics (from accumulated resource-seconds) ---
+        if self.ctx.lifecycle_manager:
+            eff = self._compute_effective_ratio()
+            summary["effective_resource_ratio"] = eff
 
-            summary["cluster_resources"] = {
-                "cpu_total": snapshot.get("cluster.cpu_total", 0),
-                "cpu_used": snapshot.get("cluster.cpu_used", 0),
-                "cpu_utilization": round(snapshot.get("cluster.cpu_utilization", 0), 4),
-                "memory_total": snapshot.get("cluster.memory_total", 0),
-                "memory_used": snapshot.get("cluster.memory_used", 0),
-                "memory_utilization": round(snapshot.get("cluster.memory_utilization", 0), 4),
-                "nodes_enabled": int(snapshot.get("cluster.nodes_enabled", 0)),
+            # Avg utilization from resource-seconds
+            nodes = self.ctx.cluster_manager.get_enabled_nodes()
+            cluster_cpu = sum(n.capacity.cpu for n in nodes)
+            cluster_mem = sum(n.capacity.memory for n in nodes)
+
+            summary["cluster_utilization"] = {
+                "cpu_total": cluster_cpu,
+                "memory_total": cluster_mem,
+                "nodes_enabled": len(nodes),
+                "avg_cpu_utilization": round(eff["total_cpu_seconds"] / (sim_end_time * cluster_cpu), 4) if cluster_cpu > 0 and sim_end_time > 0 else 0.0,
+                "avg_memory_utilization": round(eff["total_memory_seconds"] / (sim_end_time * cluster_mem), 4) if cluster_mem > 0 and sim_end_time > 0 else 0.0,
             }
 
+            # Lifecycle: count actual instances from lifecycle_manager
+            lm = self.ctx.lifecycle_manager
+            state_counts = {}
+            total_instances = 0
+            for node in nodes:
+                for inst in lm.get_instances_for_node(node.node_id):
+                    total_instances += 1
+                    state_counts[inst.state] = state_counts.get(inst.state, 0) + 1
+
             summary["lifecycle"] = {
-                "instances_total": int(snapshot.get("lifecycle.instances_total", 0)),
-                "instances_warm": int(snapshot.get("lifecycle.instances_warm", 0)),
-                "instances_running": int(snapshot.get("lifecycle.instances_running", 0)),
-                "instances_prewarm": int(snapshot.get("lifecycle.instances_prewarm", 0)),
-                "instances_evicted": int(snapshot.get("lifecycle.instances_evicted", 0)),
+                "instances_total": total_instances,
+                "instances_evicted": lm._evicted_count,
+                **{f"instances_{state}": count for state, count in sorted(state_counts.items())},
             }
 
             # Per-service autoscaling
@@ -96,22 +105,13 @@ class SummaryWriter:
                     }
                 summary["autoscaling"] = autoscaling
 
-            # Effective resource ratio (accumulated, exact)
-            summary["effective_resource_ratio"] = self._compute_effective_ratio()
-
         with open(path, "w") as f:
             json.dump(summary, f, indent=2)
 
         return path
 
     def _compute_effective_ratio(self) -> dict:
-        """Compute effective resource ratio from accumulated resource-seconds.
-
-        effective_cpu = running_cpu_seconds / total_cpu_seconds
-        effective_memory = running_memory_seconds / total_memory_seconds
-
-        Accumulated on every state transition and eviction — exact, no sampling.
-        """
+        """Compute effective resource ratio from accumulated resource-seconds."""
         lm = self.ctx.lifecycle_manager
         if lm is None:
             return {}
