@@ -42,11 +42,13 @@ class MultiActionMapper:
         pool_states: dict[str, list[str]],
         pool_target_max: int = 10,
         idle_timeout_max_minutes: int = 10,
+        delta_max: int = 0,
     ):
         self.service_ids = service_ids
         self.pool_states = pool_states
         self.pool_target_max = pool_target_max
         self.idle_timeout_max_minutes = idle_timeout_max_minutes
+        self.delta_max = delta_max  # 0 = absolute mode, >0 = delta mode
 
         # Build action dimensions: [pool_state_1, pool_state_2, ..., idle_timeout] per service
         self.dimensions = []  # list of (max_value+1,)
@@ -84,6 +86,7 @@ class MultiActionMapper:
 
         Accepts MultiDiscrete array, flat int, or continuous Box array.
         If continuous=True, pool_targets are rounded and idle_timeout is in seconds.
+        If delta_max > 0, pool_target actions are deltas added to current values.
         """
         if isinstance(action, (int, np.integer)):
             action = self.unflatten(int(action))
@@ -96,14 +99,18 @@ class MultiActionMapper:
             raw = float(action[i]) if i < len(action) else 0
 
             if action_type == "pool_target":
-                value = max(0, min(int(round(raw)), self.pool_target_max))
+                if self.delta_max > 0:
+                    # Delta mode: action is delta, clamp to [-delta_max, +delta_max]
+                    delta = int(round(np.clip(raw, -self.delta_max, self.delta_max)))
+                    current = api.get_pool_target(svc_id, state)
+                    value = max(0, min(current + delta, self.pool_target_max))
+                else:
+                    value = max(0, min(int(round(raw)), self.pool_target_max))
                 pool_updates.setdefault(svc_id, {})[state] = value
             elif action_type == "idle_timeout":
                 if continuous:
-                    # Continuous: value is seconds directly
                     api.set_idle_timeout(svc_id, max(0.0, raw))
                 else:
-                    # Discrete: value is minutes index
                     api.set_idle_timeout(svc_id, int(raw) * 60.0)
 
         # Apply pool targets in batch (single fill per service)

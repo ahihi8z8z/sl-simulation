@@ -35,6 +35,7 @@ class RewardCalculator:
         self.cold_start_penalty = abs(cold_start_penalty)
         self.mem_utilization_penalty = abs(mem_utilization_penalty)
         self.cpu_utilization_penalty = abs(cpu_utilization_penalty)
+        self.latency_penalty = abs(latency_penalty)
         self.step_duration = step_duration
         self.cluster_memory = cluster_memory
         self.cluster_cpu = cluster_cpu
@@ -106,6 +107,7 @@ class RewardCalculator:
             - self.cold_start_penalty * cold_ratio
             - self.mem_utilization_penalty * mem_util
             - self.cpu_utilization_penalty * cpu_util
+            - self.latency_penalty * (step_latency_mean / 2.5)
         )
 
         self.last_components = {

@@ -85,14 +85,22 @@ class MultiDiscreteEnv(gym.Env):
         # Action space
         if self.continuous_action:
             # Box: continuous values, round pool_targets on apply
+            lows = []
             highs = []
+            dm = self._action_mapper.delta_max
             for svc_id, action_type, state in self._action_mapper._action_map:
                 if action_type == "pool_target":
-                    highs.append(float(self._action_mapper.pool_target_max))
+                    if dm > 0:
+                        lows.append(float(-dm))
+                        highs.append(float(dm))
+                    else:
+                        lows.append(0.0)
+                        highs.append(float(self._action_mapper.pool_target_max))
                 else:
-                    highs.append(float(self._action_mapper.idle_timeout_max_minutes * 60))  # seconds
+                    lows.append(0.0)
+                    highs.append(float(self._action_mapper.idle_timeout_max_minutes * 60))
             self.action_space = spaces.Box(
-                low=np.zeros(len(highs), dtype=np.float32),
+                low=np.array(lows, dtype=np.float32),
                 high=np.array(highs, dtype=np.float32),
             )
         elif self.flatten_action:
@@ -146,6 +154,7 @@ class MultiDiscreteEnv(gym.Env):
             pool_states=pool_states,
             pool_target_max=self.gym_config.get("pool_target_max", 10),
             idle_timeout_max_minutes=self.gym_config.get("idle_timeout_max_minutes", 10),
+            delta_max=self.gym_config.get("delta_max", 0),
         )
 
         # Reward calculator — compute cluster totals for utilization
