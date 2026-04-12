@@ -35,6 +35,20 @@ class CheckpointWithNormalize(BaseCallback):
         return True
 
 
+class _SaveVecNormOnBest(BaseCallback):
+    """Callback triggered when EvalCallback finds a new best model."""
+
+    def __init__(self, save_path: str):
+        super().__init__()
+        self.save_path = save_path
+
+    def _on_step(self) -> bool:
+        env = self.model.get_env()
+        if isinstance(env, VecNormalize):
+            env.save(os.path.join(self.save_path, "best_model_vecnormalize.pkl"))
+        return True
+
+
 class RewardComponentLogger(BaseCallback):
     """Logs reward components to TensorBoard.
 
@@ -249,6 +263,9 @@ def run_training(
                 max_no_improvement_evals=early_stop_patience,
                 verbose=1,
             )
+        eval_kwargs["callback_on_new_best"] = _SaveVecNormOnBest(
+            save_path=os.path.join(save_dir, "best"),
+        )
         callbacks.append(EvalCallback(**eval_kwargs))
 
     print(f"Training {algo_name.upper()} with {env_type} env, {n_envs} envs, {total_timesteps} steps")
@@ -261,17 +278,23 @@ def run_training(
         tb_log_name=versioned_name,
     )
 
-    # Save model with versioned name
+    # Save final model with versioned name
     model_path = os.path.join(save_dir, versioned_name)
     model.save(model_path)
-
-    # Save VecNormalize stats if used
     if isinstance(vec_env, VecNormalize):
-        vec_norm_path = model_path + "_vecnormalize.pkl"
-        vec_env.save(vec_norm_path)
-        print(f"VecNormalize saved to {vec_norm_path}")
+        vec_env.save(model_path + "_vecnormalize.pkl")
+    print(f"Final model saved to {model_path}")
+
+    # Copy best model to versioned path
+    import shutil
+    best_model = os.path.join(save_dir, "best", "best_model.zip")
+    best_vecnorm = os.path.join(save_dir, "best", "best_model_vecnormalize.pkl")
+    if os.path.exists(best_model):
+        best_dest = os.path.join(save_dir, versioned_name + "_best")
+        shutil.copy2(best_model, best_dest + ".zip")
+        if os.path.exists(best_vecnorm):
+            shutil.copy2(best_vecnorm, best_dest + "_vecnormalize.pkl")
+        print(f"Best model copied to {best_dest}")
 
     vec_env.close()
-
-    print(f"Model saved to {model_path}")
     return model_path
