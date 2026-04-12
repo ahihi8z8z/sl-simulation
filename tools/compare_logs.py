@@ -129,37 +129,113 @@ def plot_latency_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
 
 def plot_container_comparison(logs: list[dict], labels: list[str], output_dir: str,
                               smooth: int = 5) -> None:
-    """Smoothed line chart comparing container count over time."""
-    fig, ax = plt.subplots(figsize=(12, 5))
+    """Stacked area chart per run: prewarm vs warm pool instances."""
+    n_runs = len(logs)
+    fig, axes = plt.subplots(n_runs, 1, figsize=(12, 3.5 * n_runs), sharex=True)
+    if n_runs == 1:
+        axes = [axes]
+
+    state_colors = {"prewarm": "#2196F3", "warm": "#F44336", "running": "#FF9800"}
+
+    for ax, log, label in zip(axes, logs, labels):
+        metrics = log.get("metrics")
+        if metrics is None or len(metrics) == 0:
+            continue
+
+        # Resample to hourly averages
+        metrics = metrics.copy()
+        metrics["_hour"] = (metrics["time"] / 3600.0).astype(int)
+        hourly = metrics.groupby("_hour").mean(numeric_only=True)
+        time_hours = hourly.index.values.astype(float)
+
+        states = []
+        values_list = []
+        colors = []
+        for state in ("prewarm", "warm", "running"):
+            col = f"lifecycle.instances_{state}"
+            if col in hourly.columns:
+                states.append(state)
+                values_list.append(hourly[col].fillna(0).values)
+                colors.append(state_colors.get(state, "#999999"))
+
+        if values_list:
+            ax.stackplot(time_hours, *values_list, labels=states, colors=colors, alpha=0.85)
+
+        # Idle window on right y-axis
+        idle_col = None
+        for col in hourly.columns:
+            if "idle_timeout" in col:
+                idle_col = col
+                break
+        if idle_col is not None:
+            ax2 = ax.twinx()
+            ax2.plot(time_hours, hourly[idle_col].values / 60.0,
+                     color="#9C27B0", linewidth=1.2, alpha=0.8, linestyle="--", label="idle window")
+            ax2.set_ylabel("Idle window (min)", fontsize=8)
+            ax2.tick_params(axis="y", labelsize=7)
+            states.append("idle window")
+
+        ax.set_ylabel("Instances")
+        ax.set_title(label, fontsize=10)
+        # Collect handles for shared legend (only from first subplot)
+        if ax == axes[0]:
+            lines1, labels1 = ax.get_legend_handles_labels()
+            if idle_col is not None:
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                _legend_handles = lines1 + lines2
+                _legend_labels = labels1 + labels2
+            else:
+                _legend_handles = lines1
+                _legend_labels = labels1
+        ax.grid(alpha=0.3)
+
+    axes[-1].set_xlabel("Time (hours)")
+
+    fig.legend(_legend_handles, _legend_labels, loc="upper center",
+               ncol=len(_legend_labels), fontsize=8, frameon=False,
+               bbox_to_anchor=(0.5, 1.0))
+    plt.tight_layout()
+    fig.subplots_adjust(top=0.93)
+    fig.savefig(os.path.join(output_dir, "comparison_containers.png"), dpi=150)
+    plt.close(fig)
+    print(f"  Saved: comparison_containers.png")
+
+
+def plot_idle_window(logs: list[dict], labels: list[str], output_dir: str) -> None:
+    """Line chart comparing idle timeout window over time (hourly average)."""
+    fig, ax = plt.subplots(figsize=(12, 4))
 
     for log, label, color in zip(logs, labels, COLORS):
         metrics = log.get("metrics")
         if metrics is None or len(metrics) == 0:
             continue
 
-        total_col = "lifecycle.instances_total"
-        if total_col not in metrics.columns:
+        # Find idle_timeout column (may have service prefix)
+        idle_col = None
+        for col in metrics.columns:
+            if "idle_timeout" in col:
+                idle_col = col
+                break
+        if idle_col is None:
             continue
 
-        time_hours = metrics["time"] / 3600.0
-        values = metrics[total_col].fillna(0)
+        m = metrics.copy()
+        m["_hour"] = (m["time"] / 3600.0).astype(int)
+        hourly = m.groupby("_hour")[idle_col].mean()
 
-        # Smooth with rolling average
-        if smooth > 1 and len(values) > smooth:
-            values = values.rolling(window=smooth, center=True, min_periods=1).mean()
-
-        ax.plot(time_hours, values, label=label, color=color, linewidth=1.0, alpha=0.85)
+        ax.plot(hourly.index, hourly.values / 60.0, label=label, color=color,
+                linewidth=1.5, alpha=0.85)
 
     ax.set_xlabel("Time (hours)")
-    ax.set_ylabel("Active Containers")
-    ax.set_title("Container Count Comparison")
+    ax.set_ylabel("Idle Timeout (minutes)")
+    ax.set_title("Idle Window Comparison (hourly avg)")
     ax.legend(loc="upper right", fontsize=9)
     ax.grid(alpha=0.3)
 
     plt.tight_layout()
-    fig.savefig(os.path.join(output_dir, "comparison_containers.png"), dpi=150)
+    fig.savefig(os.path.join(output_dir, "comparison_idle_window.png"), dpi=150)
     plt.close(fig)
-    print(f"  Saved: comparison_containers.png")
+    print(f"  Saved: comparison_idle_window.png")
 
 
 def main():
@@ -179,6 +255,7 @@ def main():
     plot_metrics_bar(logs, labels, args.output_dir)
     plot_latency_bar(logs, labels, args.output_dir)
     plot_container_comparison(logs, labels, args.output_dir, smooth=args.smooth)
+    plot_idle_window(logs, labels, args.output_dir)
     print(f"\nAll plots in {args.output_dir}/")
 
 

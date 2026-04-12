@@ -114,11 +114,13 @@ class VahidiniaEnv(gym.Env):
         logger.setLevel(logging.WARNING)
 
         builder = SimulationBuilder()
+        export_mode = 0 if self._exported else self.gym_config.get("export_mode", 0)
+        run_dir = self.gym_config.get("run_dir", "/tmp/vahidinia_gym_run")
         ctx = builder.build(
             config=self.sim_config,
-            run_dir="/tmp/vahidinia_gym_run",
+            run_dir=run_dir,
             logger=logger,
-            export_mode_override=0,
+            export_mode_override=export_mode,
         )
 
         self._engine = SimulationEngine(ctx)

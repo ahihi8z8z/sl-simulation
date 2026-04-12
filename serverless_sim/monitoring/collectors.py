@@ -110,7 +110,9 @@ class LifecycleCollector(BaseCollector):
             "lifecycle.running_memory_seconds": lm.running_memory_seconds,
         }
 
-        # Per-state counts (all states, including extended)
+        # Per-state counts — always emit base states with default 0
+        for base_state in ("prewarm", "warm", "running"):
+            metrics[f"lifecycle.instances_{base_state}"] = per_state.get(base_state, 0)
         for state, count in per_state.items():
             metrics[f"lifecycle.instances_{state}"] = count
 
