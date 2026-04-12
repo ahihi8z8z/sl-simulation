@@ -69,6 +69,7 @@ class MultiDiscreteEnv(gym.Env):
         self._action_mapper: MultiActionMapper | None = None
         self._reward_calc: RewardCalculator | None = None
         self._current_step = 0
+        self._exported = False
 
         # Build once to determine spaces
         self._build()
@@ -105,7 +106,8 @@ class MultiDiscreteEnv(gym.Env):
         logger.setLevel(logging.WARNING)
 
         builder = SimulationBuilder()
-        export_mode = self.gym_config.get("export_mode", 0)
+        # After export, disable export to prevent auto-reset from truncating files
+        export_mode = 0 if self._exported else self.gym_config.get("export_mode", 0)
         run_dir = self.gym_config.get("run_dir", "/tmp/multi_gym_run")
         ctx = builder.build(
             config=self.sim_config,
@@ -191,6 +193,12 @@ class MultiDiscreteEnv(gym.Env):
         terminated = False
         truncated = self._current_step >= self.max_steps
 
+        # Export before returning done=True, because DummyVecEnv auto-resets
+        # on done which would rebuild the engine and lose all simulation data.
+        if (terminated or truncated) and not self._exported:
+            self._engine.shutdown()
+            self._exported = True
+
         return obs, reward, terminated, truncated, {
             "snapshot": snapshot,
             "step": self._current_step,
@@ -243,6 +251,6 @@ class MultiDiscreteEnv(gym.Env):
         return self._monitor_api.get_snapshot()
 
     def close(self):
-        if self._engine is not None:
+        if self._engine is not None and not self._exported:
             self._engine.shutdown()
         self._engine = None

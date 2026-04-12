@@ -82,6 +82,7 @@ class VahidiniaEnv(gym.Env):
         self._prev_total_mem_sec = 0.0
         self._prev_total_cpu_sec = 0.0
         self._last_reward_components = {"d_total": 0.0, "d_cold": 0.0}
+        self._exported = False
 
         # Build once to determine spaces
         self._build()
@@ -186,6 +187,13 @@ class VahidiniaEnv(gym.Env):
         terminated = False
         truncated = self._current_step >= self.max_steps
 
+        # Export before returning done=True, because DummyVecEnv auto-resets
+        # on done which would rebuild the engine and lose all simulation data.
+        if (terminated or truncated) and not self._exported:
+            if self._engine is not None:
+                self._engine.shutdown()
+            self._exported = True
+
         return obs, reward, terminated, truncated, {
             "snapshot": snapshot,
             "step": self._current_step,
@@ -284,4 +292,6 @@ class VahidiniaEnv(gym.Env):
         return self._monitor_api.get_snapshot()
 
     def close(self):
+        if self._engine is not None and not self._exported:
+            self._engine.shutdown()
         self._engine = None
