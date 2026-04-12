@@ -71,7 +71,18 @@ def run_inference(
     all_steps = []
 
     for ep in range(n_episodes):
-        env = env_class(sim_config_path, gym_config_path, seed=seed + ep)
+        # Inject run_dir into gym_config for export
+        if gym_config_path:
+            import tempfile
+            with open(gym_config_path) as f:
+                gym_cfg = json.load(f)
+            gym_cfg["run_dir"] = run_dir
+            _tmp_gym = os.path.join(run_dir, f"_gym_ep{ep}.json")
+            with open(_tmp_gym, "w") as f:
+                json.dump(gym_cfg, f)
+            env = env_class(sim_config_path, _tmp_gym, seed=seed + ep)
+        else:
+            env = env_class(sim_config_path, gym_config_path, seed=seed + ep)
 
         if has_vec_norm:
             vec_env = DummyVecEnv([lambda: env])
