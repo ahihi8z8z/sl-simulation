@@ -48,16 +48,24 @@ class ContainerInstance:
         # Eviction flag — checked by in-flight _cold_start processes
         self.evicted: bool = False
 
+        # Pool membership: None = demand container, "prewarm"/"warm" = pool container
+        self.pool_state: Optional[str] = None
+
     @property
     def is_idle(self) -> bool:
         return self.active_requests == 0
+
+    @property
+    def is_pool_container(self) -> bool:
+        return self.pool_state is not None
 
     @property
     def available_slots(self) -> int:
         return self.max_concurrency - self.slots.count
 
     def __repr__(self) -> str:
+        pool = f", pool={self.pool_state}" if self.pool_state else ""
         return (
             f"ContainerInstance(id={self.instance_id}, service={self.service_id}, "
-            f"state={self.state}, active={self.active_requests}/{self.max_concurrency})"
+            f"state={self.state}, active={self.active_requests}/{self.max_concurrency}{pool})"
         )

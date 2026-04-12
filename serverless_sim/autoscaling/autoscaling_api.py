@@ -40,6 +40,14 @@ class AutoscalingAPI:
     def batch_set_pool_targets(self, service_id: str, targets: dict[str, int]) -> None:
         self._autoscaler.batch_set_pool_targets(service_id, targets)
 
+    # -- Pool/demand counts --
+
+    def get_pool_container_count(self, service_id: str, state: str) -> int:
+        return self._autoscaler._count_pool_containers(service_id, state)
+
+    def get_demand_container_count(self, service_id: str) -> int:
+        return self._autoscaler._count_demand_containers(service_id)
+
     # -- Idle timeout --
 
     def get_idle_timeout(self, service_id: str) -> float:

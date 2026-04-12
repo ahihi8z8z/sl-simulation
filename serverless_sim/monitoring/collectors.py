@@ -167,9 +167,17 @@ class AutoscalingCollector(BaseCollector):
             current = ctx.autoscaling_manager._count_total_instances(svc_id)
             metrics[f"autoscaling.{svc_id}.remaining_capacity"] = max(0, max_inst - current)
 
-            # Per-state pool targets
+            # Per-state pool targets and pool container counts
             targets = ctx.autoscaling_manager.get_all_pool_targets(svc_id)
             for state, count in targets.items():
                 metrics[f"autoscaling.{svc_id}.pool_target.{state}"] = count
+                metrics[f"autoscaling.{svc_id}.pool_containers.{state}"] = (
+                    ctx.autoscaling_manager._count_pool_containers(svc_id, state)
+                )
+
+            # Demand container count
+            metrics[f"autoscaling.{svc_id}.demand_containers"] = (
+                ctx.autoscaling_manager._count_demand_containers(svc_id)
+            )
 
         return metrics

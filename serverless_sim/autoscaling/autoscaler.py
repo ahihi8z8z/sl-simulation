@@ -11,15 +11,19 @@ if TYPE_CHECKING:
 
 
 class OpenWhiskPoolAutoscaler:
-    """Memory-bounded pool autoscaler with min/max instances and per-state pool targets.
+    """Persistent-pool autoscaler with min/max instances and per-state pool targets.
+
+    Pool containers are persistent — they are NOT evicted by idle_timeout.
+    After serving, they return to their pool_state. Only explicit API calls
+    (set_pool_target decrease) can remove pool containers.
+
+    Demand containers (created on-the-fly by request dispatch) ARE subject
+    to idle_timeout eviction.
 
     Periodic reconcile loop:
-    1. Evict idle containers past idle_timeout (respects min_instances)
-    2. Evict LRU idle containers when node is over memory (can violate min_instances)
-    3. Top-up pool targets per state along the cold-start chain
-
-    min_instances / max_instances are user-facing service config.
-    pool_targets and idle_timeout are controller/policy-managed parameters.
+    1. Evict idle demand containers past idle_timeout (respects min_instances)
+    2. Demote idle pool containers past idle_timeout back to pool_state
+    3. LRU eviction when node is over memory (prefers demand containers first)
     """
 
     def __init__(self, ctx: SimContext, reconcile_interval: float = 5.0,
@@ -33,17 +37,11 @@ class OpenWhiskPoolAutoscaler:
         self._min_instances: dict[str, int] = {}
         self._max_instances: dict[str, int] = {}
 
-        # Per-service parameters (controller/policy-managed, not from service config)
+        # Per-service parameters (controller/policy-managed)
         self._idle_timeout: dict[str, float] = {}
-        # Per-service per-state pool targets: {svc_id: {state: count}}
         self._pool_targets: dict[str, dict[str, int]] = {}
 
-        # Track creates within the same SimPy timestep to avoid double-creating.
-        # Reset when env.now advances.
-        self._pending_creates: dict[str, int] = {}
-        self._pending_time: float = -1.0
-
-        # Initialize from config (service config + optional autoscaling_defaults)
+        # Initialize from config
         for svc in ctx.workload_manager.services.values():
             svc_cfg = self._find_service_config(svc.service_id)
             defaults = svc_cfg.get("autoscaling_defaults", {}) if svc_cfg else {}
@@ -54,7 +52,6 @@ class OpenWhiskPoolAutoscaler:
             self._pool_targets[svc.service_id] = dict(defaults.get("pool_targets", {}))
 
     def _find_service_config(self, service_id: str) -> dict | None:
-        """Find the raw service config dict by service_id."""
         for svc_cfg in self.ctx.config.get("services", []):
             if svc_cfg.get("service_id") == service_id:
                 return svc_cfg
@@ -67,12 +64,19 @@ class OpenWhiskPoolAutoscaler:
         return [s for s in chain if s not in ("null", "warm")]
 
     def _get_evictable_states(self, service_id: str) -> set[str]:
-        """Get evictable states for a service."""
         sm = self.ctx.workload_manager.services[service_id].state_machine
         return sm.get_evictable_states()
 
+    # ------------------------------------------------------------------
+    # Start / reconcile
+    # ------------------------------------------------------------------
+
     def start(self) -> None:
-        self.initial_fill()
+        # Fill min_instances as pool containers at startup
+        for svc_id in self.ctx.workload_manager.services:
+            min_inst = self._min_instances.get(svc_id, 0)
+            if min_inst > 0:
+                self._fill_pool_to_target_count(svc_id, "warm", min_inst, pool_state="warm")
         self.ctx.env.process(self._reconcile_loop())
 
     def _reconcile_loop(self):
@@ -83,202 +87,119 @@ class OpenWhiskPoolAutoscaler:
     def reconcile(self) -> None:
         """Run one reconcile cycle across all nodes.
 
-        Reconcile handles eviction only (idle timeout + LRU).
-        Pool top-up is reactive -- triggered immediately when an instance
-        is consumed or evicted via ``notify_pool_change()``.
+        1. Demand containers idle → evict (respects min_instances)
+        2. Pool containers idle → demote to pool_state (NOT evict)
+        3. LRU eviction under memory pressure (prefer demand first)
         """
         now = self.ctx.env.now
         lm = self.ctx.lifecycle_manager
 
         for node in self.ctx.cluster_manager.get_enabled_nodes():
-            instances = lm.get_instances_for_node(node.node_id)
-
-            # 1. Evict idle warm containers past idle_timeout
-            #    Only warm containers are subject to idle timeout.
-            #    Pool containers at intermediate states (prewarm, code_loaded, ...)
-            #    persist until consumed or LRU-evicted -- like OpenWhisk stem cells.
-            #    Respect min_instances: don't evict below min.
-            for inst in instances:
-                if inst.state == "warm" and inst.is_idle:
+            # 1. Idle timeout: demand containers → evict
+            for inst in list(lm.get_instances_for_node(node.node_id)):
+                if inst.state == "warm" and inst.is_idle and not inst.is_pool_container:
                     timeout = self._idle_timeout.get(inst.service_id, 60.0)
                     if timeout < 0:
-                        continue  # -1 means never evict
+                        continue
                     if (now - inst.last_used_at) >= timeout:
-                        # Check min_instances before evicting (alive = warm + running)
                         alive_count = self._count_alive_instances(inst.service_id)
                         min_inst = self._min_instances.get(inst.service_id, 0)
                         if alive_count <= min_inst:
-                            continue  # don't evict below min_instances
+                            continue
                         lm.evict_instance(inst)
 
-            # 2. LRU eviction when node memory is overcommitted
-            #    CAN violate min_instances (soft guarantee)
-            instances = lm.get_instances_for_node(node.node_id)
+            # 2. Idle timeout: pool containers → demote to pool_state
+            for inst in list(lm.get_instances_for_node(node.node_id)):
+                if inst.state == "warm" and inst.is_idle and inst.is_pool_container:
+                    if inst.pool_state == "warm":
+                        continue  # already at pool_state
+                    timeout = self._idle_timeout.get(inst.service_id, 60.0)
+                    if timeout < 0:
+                        continue
+                    if (now - inst.last_used_at) >= timeout:
+                        lm.demote_to_pool_state(inst)
+
+            # 3. LRU eviction under memory pressure (prefer demand first)
             while node.available.memory < 0:
+                instances = lm.get_instances_for_node(node.node_id)
                 candidates = [
                     i for i in instances
                     if i.state in self._get_evictable_states(i.service_id) and i.is_idle
                 ]
                 if not candidates:
                     break
-                candidates.sort(key=lambda i: i.last_used_at)
+                # Sort: demand first (is_pool_container=False < True), then LRU
+                candidates.sort(key=lambda i: (i.is_pool_container, i.last_used_at))
                 lm.evict_instance(candidates[0])
-                instances = lm.get_instances_for_node(node.node_id)
 
     # ------------------------------------------------------------------
-    # Reactive pool top-up
+    # Pool fill (only on explicit API calls)
     # ------------------------------------------------------------------
 
-    def notify_pool_change(self, node_id: str, service_id: str) -> None:
-        """Reactively replenish pool targets for *service_id*.
+    def _fill_pool_to_target(self, service_id: str, state: str) -> None:
+        """Fill pool containers for a specific state up to its target.
 
-        Called when an instance is consumed or evicted.
-        In per_node mode, fills on the specific node.
-        In global mode, fills across all nodes using placement strategy.
+        Counts by pool_state field (not current state) to handle in-flight containers.
         """
+        target = self._pool_targets.get(service_id, {}).get(state, 0)
+        current = self._count_pool_containers(service_id, state)
+        deficit = target - current
+        if deficit <= 0:
+            return
+        self._fill_pool_to_target_count(service_id, state, deficit, pool_state=state)
+
+    def _fill_pool_to_target_count(self, service_id: str, target_state: str,
+                                    count: int, pool_state: str | None = None) -> None:
+        """Create exactly `count` containers with given pool_state."""
+        lm = self.ctx.lifecycle_manager
+        max_inst = self._max_instances.get(service_id, 0)
+        total = self._count_total_instances(service_id)
+        created = 0
+
+        def _has_budget():
+            if max_inst <= 0:
+                return True
+            return (total + created) < max_inst
+
         if self.pool_mode == "global":
-            self._fill_pool_global(service_id)
-        else:
-            self._fill_pool_per_node(node_id, service_id)
-
-    def _fill_pool_per_node(self, node_id: str, service_id: str) -> None:
-        """Fill pool targets on a specific node (per_node mode)."""
-        lm = self.ctx.lifecycle_manager
-        node = self.ctx.cluster_manager.get_node(node_id)
-        service = self.ctx.workload_manager.services[service_id]
-        mem_req = ResourceProfile(cpu=0.0, memory=service.peak_memory)
-
-        max_inst = self._max_instances.get(service_id, 0)
-        min_inst = self._min_instances.get(service_id, 0)
-
-        now = self.ctx.env.now
-        if now != self._pending_time:
-            self._pending_creates.clear()
-            self._pending_time = now
-
-        actual_total = self._count_total_instances(service_id)
-        pending = self._pending_creates.get(service_id, 0)
-        effective_total = actual_total + pending
-
-        if max_inst > 0 and effective_total >= max_inst:
-            return
-
-        created = 0
-
-        def _has_budget():
-            if max_inst <= 0:
-                return True
-            return (effective_total + created) < max_inst
-
-        alive_count = self._count_alive_instances(service_id)
-        warm_deficit = max(0, min_inst - alive_count - pending)
-
-        for _ in range(warm_deficit):
-            if not _has_budget():
-                break
-            if node.available.can_fit(mem_req):
-                lm.prepare_instance_for_service(node, service_id, target_state="warm")
-                created += 1
-
-        pool_states = self._get_pool_states(service_id) + ["warm"]
-        for state in pool_states:
-            target = self._pool_targets.get(service_id, {}).get(state, 0)
-            if target <= 0:
-                continue
-            at_state = [
-                i for i in lm.get_instances_for_node(node_id)
-                if i.service_id == service_id and i.state == state
-            ]
-            deficit = target - len(at_state)
-            for _ in range(deficit):
-                if not _has_budget():
-                    break
-                if node.available.can_fit(mem_req):
-                    lm.prepare_instance_for_service(node, service_id, target_state=state)
-                    created += 1
-
-        self._pending_creates[service_id] = self._pending_creates.get(service_id, 0) + created
-
-    def _fill_pool_global(self, service_id: str) -> None:
-        """Fill pool targets across all nodes (global mode)."""
-        lm = self.ctx.lifecycle_manager
-        placement = self.ctx.placement_strategy
-
-        max_inst = self._max_instances.get(service_id, 0)
-        min_inst = self._min_instances.get(service_id, 0)
-
-        now = self.ctx.env.now
-        if now != self._pending_time:
-            self._pending_creates.clear()
-            self._pending_time = now
-
-        actual_total = self._count_total_instances(service_id)
-        pending = self._pending_creates.get(service_id, 0)
-        effective_total = actual_total + pending
-
-        if max_inst > 0 and effective_total >= max_inst:
-            return
-
-        created = 0
-        nodes = self.ctx.cluster_manager.get_enabled_nodes()
-
-        def _has_budget():
-            if max_inst <= 0:
-                return True
-            return (effective_total + created) < max_inst
-
-        # 1. Fill warm to min_instances (global count)
-        alive_count = self._count_alive_instances(service_id)
-        warm_deficit = max(0, min_inst - alive_count - pending)
-
-        for _ in range(warm_deficit):
-            if not _has_budget():
-                break
-            node = placement.select_node(nodes, service_id, self.ctx)
-            if node is None:
-                break
-            lm.prepare_instance_for_service(node, service_id, target_state="warm")
-            created += 1
-
-        # 2. Fill pool_targets (global count across all nodes)
-        pool_states = self._get_pool_states(service_id) + ["warm"]
-        for state in pool_states:
-            target = self._pool_targets.get(service_id, {}).get(state, 0)
-            if target <= 0:
-                continue
-            at_state_count = sum(
-                1 for n in nodes
-                for i in lm.get_instances_for_node(n.node_id)
-                if i.service_id == service_id and i.state == state
-            )
-            deficit = target - at_state_count
-            for _ in range(deficit):
+            placement = self.ctx.placement_strategy
+            nodes = self.ctx.cluster_manager.get_enabled_nodes()
+            for _ in range(count):
                 if not _has_budget():
                     break
                 node = placement.select_node(nodes, service_id, self.ctx)
                 if node is None:
                     break
-                lm.prepare_instance_for_service(node, service_id, target_state=state)
+                lm.prepare_instance_for_service(node, service_id,
+                                                 target_state=target_state,
+                                                 pool_state=pool_state)
                 created += 1
-
-        self._pending_creates[service_id] = self._pending_creates.get(service_id, 0) + created
-
-    def initial_fill(self) -> None:
-        """Fill all pools to their targets on startup."""
-        if self.pool_mode == "global":
-            for svc_id in self.ctx.workload_manager.services:
-                self._fill_pool_global(svc_id)
-            return
-        for node in self.ctx.cluster_manager.get_enabled_nodes():
-            for svc_id in self.ctx.workload_manager.services:
-                self.notify_pool_change(node.node_id, svc_id)
+        else:
+            nodes = self.ctx.cluster_manager.get_enabled_nodes()
+            service = self.ctx.workload_manager.services[service_id]
+            mem_req = ResourceProfile(cpu=0.0, memory=service.peak_memory)
+            for _ in range(count):
+                if not _has_budget():
+                    break
+                # Round-robin across nodes that have capacity
+                placed = False
+                for node in nodes:
+                    if node.available.can_fit(mem_req):
+                        lm.prepare_instance_for_service(node, service_id,
+                                                         target_state=target_state,
+                                                         pool_state=pool_state)
+                        created += 1
+                        placed = True
+                        break
+                if not placed:
+                    break
 
     # ------------------------------------------------------------------
     # Instance counting helpers
     # ------------------------------------------------------------------
 
     def _count_total_instances(self, service_id: str) -> int:
-        """Count all instances for service across all nodes (excluding evicted)."""
+        """Count all instances for service across all nodes."""
         total = 0
         for node in self.ctx.cluster_manager.get_enabled_nodes():
             for inst in self.ctx.lifecycle_manager.get_instances_for_node(node.node_id):
@@ -296,12 +217,7 @@ class OpenWhiskPoolAutoscaler:
         return count
 
     def _count_alive_instances(self, service_id: str) -> int:
-        """Count warm + running instances for service across all nodes.
-
-        This represents provisioned capacity — instances that exist and
-        can serve requests (warm) or are currently serving (running).
-        Used for min_instances enforcement.
-        """
+        """Count warm + running instances (provisioned capacity)."""
         count = 0
         for node in self.ctx.cluster_manager.get_enabled_nodes():
             for inst in self.ctx.lifecycle_manager.get_instances_for_node(node.node_id):
@@ -309,8 +225,26 @@ class OpenWhiskPoolAutoscaler:
                     count += 1
         return count
 
+    def _count_pool_containers(self, service_id: str, pool_state: str) -> int:
+        """Count containers with matching pool_state (regardless of current state)."""
+        count = 0
+        for node in self.ctx.cluster_manager.get_enabled_nodes():
+            for inst in self.ctx.lifecycle_manager.get_instances_for_node(node.node_id):
+                if inst.service_id == service_id and inst.pool_state == pool_state:
+                    count += 1
+        return count
+
+    def _count_demand_containers(self, service_id: str) -> int:
+        """Count demand containers (pool_state is None)."""
+        count = 0
+        for node in self.ctx.cluster_manager.get_enabled_nodes():
+            for inst in self.ctx.lifecycle_manager.get_instances_for_node(node.node_id):
+                if inst.service_id == service_id and inst.pool_state is None:
+                    count += 1
+        return count
+
     # ------------------------------------------------------------------
-    # min_instances / max_instances access
+    # min_instances / max_instances
     # ------------------------------------------------------------------
 
     def get_min_instances(self, service_id: str) -> int:
@@ -322,11 +256,10 @@ class OpenWhiskPoolAutoscaler:
         if value < old:
             self._evict_excess_warm(service_id)
         elif value > old:
-            if self.pool_mode == "global":
-                self._fill_pool_global(service_id)
-            else:
-                for node in self.ctx.cluster_manager.get_enabled_nodes():
-                    self.notify_pool_change(node.node_id, service_id)
+            # Fill new warm pool containers up to new min
+            deficit = value - self._count_alive_instances(service_id)
+            if deficit > 0:
+                self._fill_pool_to_target_count(service_id, "warm", deficit, pool_state="warm")
 
     def get_max_instances(self, service_id: str) -> int:
         return self._max_instances.get(service_id, 0)
@@ -339,15 +272,10 @@ class OpenWhiskPoolAutoscaler:
     # ------------------------------------------------------------------
 
     def get_pool_target(self, service_id: str, state: str) -> int:
-        """Get pool target for a specific state."""
         return self._pool_targets.get(service_id, {}).get(state, 0)
 
     def set_pool_target(self, service_id: str, state: str, count: int) -> None:
-        """Set pool target for a specific state (must be an intermediate state).
-
-        If target increases, triggers reactive top-up on all nodes.
-        If target decreases, evicts excess pool containers at that state.
-        """
+        """Set pool target. Increase → create pool containers. Decrease → evict excess."""
         pool_states = self._get_pool_states(service_id)
         valid_states = set(pool_states) | {"warm"}
         if state not in valid_states:
@@ -361,18 +289,11 @@ class OpenWhiskPoolAutoscaler:
         if count < old:
             self._evict_excess_pool(service_id, state)
         elif count > old:
-            if self.pool_mode == "global":
-                self._fill_pool_global(service_id)
-            else:
-                for node in self.ctx.cluster_manager.get_enabled_nodes():
-                    self.notify_pool_change(node.node_id, service_id)
+            self._fill_pool_to_target(service_id, state)
 
     def batch_set_pool_targets(self, service_id: str, targets: dict[str, int]) -> None:
-        """Set multiple pool targets at once, then fill/evict once.
-
-        Much faster than calling set_pool_target() per state.
-        """
-        need_fill = False
+        """Set multiple pool targets at once, then fill/evict."""
+        need_fill_states = []
         need_evict_states = []
 
         for state, count in targets.items():
@@ -383,24 +304,16 @@ class OpenWhiskPoolAutoscaler:
             old = self._pool_targets.get(service_id, {}).get(state, 0)
             self._pool_targets.setdefault(service_id, {})[state] = count
             if count > old:
-                need_fill = True
+                need_fill_states.append(state)
             elif count < old:
                 need_evict_states.append(state)
 
-        # Evict excess (per state)
         for state in need_evict_states:
             self._evict_excess_pool(service_id, state)
-
-        # Fill once for all increased targets
-        if need_fill:
-            if self.pool_mode == "global":
-                self._fill_pool_global(service_id)
-            else:
-                for node in self.ctx.cluster_manager.get_enabled_nodes():
-                    self.notify_pool_change(node.node_id, service_id)
+        for state in need_fill_states:
+            self._fill_pool_to_target(service_id, state)
 
     def get_all_pool_targets(self, service_id: str) -> dict[str, int]:
-        """Get all pool targets for a service."""
         return dict(self._pool_targets.get(service_id, {}))
 
     # ------------------------------------------------------------------
@@ -408,48 +321,32 @@ class OpenWhiskPoolAutoscaler:
     # ------------------------------------------------------------------
 
     def _evict_excess_pool(self, service_id: str, state: str) -> None:
-        """Evict excess pool containers at/heading-to *state* when target decreases.
+        """Evict excess pool containers when target decreases.
 
-        Matches containers currently at the state OR transitioning towards it
-        (target_state == state) to prevent accumulation from in-flight promotions.
+        Matches by pool_state field. Running containers get demoted to
+        demand (pool_state=None) so they'll be evicted after idle_timeout.
         """
         target = self._pool_targets.get(service_id, {}).get(state, 0)
         lm = self.ctx.lifecycle_manager
 
-        def _matches(inst):
-            if inst.service_id != service_id:
-                return False
-            # Already at target state
-            if inst.state == state:
-                return True
-            # In-flight: being promoted towards target state
-            if inst.target_state == state:
-                return True
-            return False
+        candidates = []
+        for node in self.ctx.cluster_manager.get_enabled_nodes():
+            for inst in lm.get_instances_for_node(node.node_id):
+                if inst.service_id == service_id and inst.pool_state == state:
+                    candidates.append(inst)
 
-        if self.pool_mode == "global":
-            candidates = [
-                i for node in self.ctx.cluster_manager.get_enabled_nodes()
-                for i in lm.get_instances_for_node(node.node_id)
-                if _matches(i)
-            ]
-            excess = len(candidates) - target
-            if excess > 0:
-                candidates.sort(key=lambda i: i.created_at)
-                for inst in candidates[:excess]:
-                    lm.evict_instance(inst)
-        else:
-            for node in self.ctx.cluster_manager.get_enabled_nodes():
-                candidates = [
-                    i for i in lm.get_instances_for_node(node.node_id)
-                    if _matches(i)
-                ]
-                excess = len(candidates) - target
-                if excess <= 0:
-                    continue
-                candidates.sort(key=lambda i: i.created_at)
-                for inst in candidates[:excess]:
-                    lm.evict_instance(inst)
+        excess = len(candidates) - target
+        if excess <= 0:
+            return
+
+        # Evict idle first, then demote running to demand
+        candidates.sort(key=lambda i: (i.active_requests > 0, i.created_at))
+        for inst in candidates[:excess]:
+            if inst.is_idle:
+                lm.evict_instance(inst)
+            else:
+                # Running: demote to demand, will be evicted after idle_timeout
+                inst.pool_state = None
 
     def _evict_excess_warm(self, service_id: str) -> None:
         """Evict excess idle warm containers when min_instances decreases."""
@@ -460,7 +357,6 @@ class OpenWhiskPoolAutoscaler:
             alive = self._count_alive_instances(service_id)
             if alive <= min_inst:
                 break
-            # Find an idle warm container to evict (oldest first)
             candidate = None
             for node in self.ctx.cluster_manager.get_enabled_nodes():
                 for inst in lm.get_instances_for_node(node.node_id):
@@ -469,7 +365,7 @@ class OpenWhiskPoolAutoscaler:
                         if candidate is None or inst.last_used_at < candidate.last_used_at:
                             candidate = inst
             if candidate is None:
-                break  # no idle warm to evict
+                break
             lm.evict_instance(candidate)
 
     # ------------------------------------------------------------------

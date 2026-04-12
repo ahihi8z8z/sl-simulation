@@ -178,20 +178,17 @@ class LifecycleManager:
             self.ctx.env.now, instance.instance_id, from_state, node.node_id,
         )
 
-        if self.ctx.autoscaling_manager is not None:
-            self.ctx.autoscaling_manager.notify_pool_change(
-                node.node_id, instance.service_id,
-            )
-
         return instance
 
     def prepare_instance_for_service(
         self, node: Node, service_id: str, target_state: str = "warm",
+        pool_state: str | None = None,
     ) -> simpy.events.Event:
         """Create a new instance and transition it to *target_state*."""
-        return self.ctx.env.process(self._cold_start(node, service_id, target_state))
+        return self.ctx.env.process(self._cold_start(node, service_id, target_state, pool_state))
 
-    def _cold_start(self, node: Node, service_id: str, target_state: str = "warm"):
+    def _cold_start(self, node: Node, service_id: str, target_state: str = "warm",
+                     pool_state: str | None = None):
         """SimPy process: follow chain from null → target_state."""
         service = self.ctx.workload_manager.services[service_id]
         sm = self._get_sm(service_id)
@@ -203,6 +200,7 @@ class LifecycleManager:
             max_concurrency=service.max_concurrency,
         )
         inst.target_state = target_state  # Set immediately for eviction matching
+        inst.pool_state = pool_state
         self._get_instances(node.node_id).append(inst)
 
         # Allocate null state resources (typically 0)
@@ -332,6 +330,25 @@ class LifecycleManager:
             self._transition_state(node, instance, "warm")
 
     # ------------------------------------------------------------------
+    # Pool demotion
+    # ------------------------------------------------------------------
+
+    def demote_to_pool_state(self, instance: ContainerInstance) -> None:
+        """Demote a pool container from warm back to its pool_state.
+
+        Releases warm-level resources and allocates pool_state-level resources.
+        Instant transition (no time cost).
+        """
+        if instance.pool_state is None or instance.pool_state == instance.state:
+            return
+        node = self.ctx.cluster_manager.get_node(instance.node_id)
+        self._transition_state(node, instance, instance.pool_state)
+        self.logger.debug(
+            "t=%.3f | DEMOTE | %s warm→%s on %s",
+            self.ctx.env.now, instance.instance_id, instance.pool_state, node.node_id,
+        )
+
+    # ------------------------------------------------------------------
     # Eviction
     # ------------------------------------------------------------------
 
@@ -371,11 +388,6 @@ class LifecycleManager:
             "t=%.3f | EVICT | %s from %s (total_evicted=%d)",
             self.ctx.env.now, instance.instance_id, instance.node_id, self._evicted_count,
         )
-
-        if self.ctx.autoscaling_manager is not None:
-            self.ctx.autoscaling_manager.notify_pool_change(
-                instance.node_id, instance.service_id,
-            )
 
     def get_instances_for_node(self, node_id: str, state: str | None = None) -> list[ContainerInstance]:
         """Get instances on a node, optionally filtered by state."""
