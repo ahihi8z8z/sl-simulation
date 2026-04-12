@@ -138,6 +138,8 @@ class VahidiniaEnv(gym.Env):
 
         if seed is not None:
             self.sim_config["simulation"]["seed"] = seed
+        else:
+            self.sim_config["simulation"]["seed"] = int(np.random.randint(0, 2**31))
 
         self._build()
         self._current_step = 0

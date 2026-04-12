@@ -161,6 +161,9 @@ class MultiDiscreteEnv(gym.Env):
         super().reset(seed=seed)
         if seed is not None:
             self.sim_config["simulation"]["seed"] = seed
+        else:
+            # Random seed each episode for variation in transition sampling
+            self.sim_config["simulation"]["seed"] = int(np.random.randint(0, 2**31))
 
         self._build()
         self._current_step = 0
