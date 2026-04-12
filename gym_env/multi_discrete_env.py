@@ -105,11 +105,13 @@ class MultiDiscreteEnv(gym.Env):
         logger.setLevel(logging.WARNING)
 
         builder = SimulationBuilder()
+        export_mode = self.gym_config.get("export_mode", 0)
+        run_dir = self.gym_config.get("run_dir", "/tmp/multi_gym_run")
         ctx = builder.build(
             config=self.sim_config,
-            run_dir="/tmp/multi_gym_run",
+            run_dir=run_dir,
             logger=logger,
-            export_mode_override=0,
+            export_mode_override=export_mode,
         )
 
         self._engine = SimulationEngine(ctx)
@@ -241,4 +243,6 @@ class MultiDiscreteEnv(gym.Env):
         return self._monitor_api.get_snapshot()
 
     def close(self):
+        if self._engine is not None:
+            self._engine.shutdown()
         self._engine = None
