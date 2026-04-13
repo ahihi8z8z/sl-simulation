@@ -60,12 +60,9 @@ class ClusterCollector(BaseCollector):
                         running_cpu += inst.allocated_cpu
                         running_mem += inst.allocated_memory
 
-        metrics["cluster.nodes_enabled"] = len(nodes)
-        metrics["cluster.cpu_total"] = total_cpu
         metrics["cluster.cpu_used"] = used_cpu
         metrics["cluster.cpu_used_running"] = running_cpu
         metrics["cluster.cpu_utilization"] = used_cpu / total_cpu if total_cpu > 0 else 0.0
-        metrics["cluster.memory_total"] = total_mem
         metrics["cluster.memory_used"] = used_mem
         metrics["cluster.memory_used_running"] = running_mem
         metrics["cluster.memory_utilization"] = used_mem / total_mem if total_mem > 0 else 0.0
@@ -156,29 +153,24 @@ class AutoscalingCollector(BaseCollector):
             return {}
 
         metrics = {}
+        am = ctx.autoscaling_manager
         for svc_id in ctx.workload_manager.services:
-            metrics[f"autoscaling.{svc_id}.idle_timeout"] = ctx.autoscaling_manager.get_idle_timeout(svc_id)
-            metrics[f"autoscaling.{svc_id}.min_instances"] = ctx.autoscaling_manager.get_min_instances(svc_id)
-            metrics[f"autoscaling.{svc_id}.max_instances"] = ctx.autoscaling_manager.get_max_instances(svc_id)
-            metrics[f"autoscaling.{svc_id}.current_instances"] = ctx.autoscaling_manager._count_total_instances(svc_id)
-            metrics[f"autoscaling.{svc_id}.alive_instances"] = ctx.autoscaling_manager._count_alive_instances(svc_id)
-            metrics[f"autoscaling.{svc_id}.warm_instances"] = ctx.autoscaling_manager._count_warm_instances(svc_id)
-            # Remaining capacity (max_instances - current)
-            max_inst = ctx.autoscaling_manager.get_max_instances(svc_id)
-            current = ctx.autoscaling_manager._count_total_instances(svc_id)
+            metrics[f"autoscaling.{svc_id}.idle_timeout"] = am.get_idle_timeout(svc_id)
+            max_inst = am.get_max_instances(svc_id)
+            current = am._count_total_instances(svc_id)
             metrics[f"autoscaling.{svc_id}.remaining_capacity"] = max(0, max_inst - current)
 
-            # Per-state pool targets and pool container counts
-            targets = ctx.autoscaling_manager.get_all_pool_targets(svc_id)
-            for state, count in targets.items():
-                metrics[f"autoscaling.{svc_id}.pool_target.{state}"] = count
+            # Per-state pool targets and pool container counts (always emit)
+            targets = am.get_all_pool_targets(svc_id)
+            pool_states = am._get_pool_states(svc_id) + ["warm"]
+            for state in pool_states:
+                metrics[f"autoscaling.{svc_id}.pool_target.{state}"] = targets.get(state, 0)
                 metrics[f"autoscaling.{svc_id}.pool_containers.{state}"] = (
-                    ctx.autoscaling_manager._count_pool_containers(svc_id, state)
+                    am._count_pool_containers(svc_id, state)
                 )
 
-            # Demand container count
             metrics[f"autoscaling.{svc_id}.demand_containers"] = (
-                ctx.autoscaling_manager._count_demand_containers(svc_id)
+                am._count_demand_containers(svc_id)
             )
 
         return metrics

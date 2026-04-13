@@ -28,6 +28,8 @@ class RewardCalculator:
         memory_efficiency_reward: float = 0.0,
         cpu_efficiency_reward: float = 0.0,
         latency_penalty: float = 0.0,
+        cold_start_normalize: float = 0.0,
+        drop_normalize: float = 0.0,
         resource_penalty: float = 0.0,
         throughput_reward: float = 0.0,
     ):
@@ -36,6 +38,8 @@ class RewardCalculator:
         self.mem_utilization_penalty = abs(mem_utilization_penalty)
         self.cpu_utilization_penalty = abs(cpu_utilization_penalty)
         self.latency_penalty = abs(latency_penalty)
+        self.cold_start_normalize = cold_start_normalize  # 0 = ratio mode, >0 = fixed denominator
+        self.drop_normalize = drop_normalize
         self.step_duration = step_duration
         self.cluster_memory = cluster_memory
         self.cluster_cpu = cluster_cpu
@@ -89,8 +93,10 @@ class RewardCalculator:
         self._prev_total_cpu_sec = total_cpu_sec
 
         # Ratios (0 = good, 1 = bad)
-        drop_ratio = d_dropped / max(d_total, 1.0)
-        cold_ratio = d_cold / max(d_total, 1.0)
+        cold_denom = self.cold_start_normalize if self.cold_start_normalize > 0 else max(d_total, 1.0)
+        drop_denom = self.drop_normalize if self.drop_normalize > 0 else max(d_total, 1.0)
+        drop_ratio = d_dropped / drop_denom
+        cold_ratio = d_cold / cold_denom
 
         # Resource utilization (0 = idle, 1 = full cluster)
         max_mem_sec = self.step_duration * self.cluster_memory
