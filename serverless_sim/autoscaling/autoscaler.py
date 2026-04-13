@@ -70,11 +70,15 @@ class OpenWhiskPoolAutoscaler:
     # ------------------------------------------------------------------
 
     def start(self) -> None:
-        # Fill min_instances as pool containers at startup
         for svc_id in self.ctx.workload_manager.services:
+            # Fill min_instances as warm pool containers
             min_inst = self._min_instances.get(svc_id, 0)
             if min_inst > 0:
                 self._fill_pool_to_target_count(svc_id, "warm", min_inst, pool_state="warm")
+            # Fill pool_targets from config
+            for state, target in self._pool_targets.get(svc_id, {}).items():
+                if target > 0:
+                    self._fill_pool_to_target(svc_id, state)
 
     def handle_idle_timeout(self, instance) -> None:
         """Called by lifecycle manager when idle timer fires.
