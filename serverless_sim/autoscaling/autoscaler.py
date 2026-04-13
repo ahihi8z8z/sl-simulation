@@ -148,9 +148,65 @@ class OpenWhiskPoolAutoscaler:
             return
         self._fill_pool_to_target_count(service_id, state, deficit, pool_state=state)
 
+    def _get_state_priority(self, service_id: str, state: str) -> int:
+        """Higher priority for states closer to warm in the cold-start chain.
+
+        demand (None) = 0, null = 1, prewarm = 2, ..., warm = highest.
+        """
+        sm = self.ctx.workload_manager.services[service_id].state_machine
+        chain = sm.get_cold_start_path()  # ["null", "prewarm", "warm"]
+        if state in chain:
+            return chain.index(state)
+        return 0
+
+    def _evict_lower_priority_for_budget(self, service_id: str, target_state: str,
+                                          needed: int) -> int:
+        """Evict lower-priority idle containers to make room for higher-priority pool.
+
+        Returns number of slots freed.
+        """
+        target_prio = self._get_state_priority(service_id, target_state)
+        lm = self.ctx.lifecycle_manager
+        freed = 0
+
+        # Collect candidates: demand containers and pool containers with lower priority
+        candidates = []
+        for node in self.ctx.cluster_manager.get_enabled_nodes():
+            for inst in lm.get_instances_for_node(node.node_id):
+                if inst.service_id != service_id or not inst.is_idle:
+                    continue
+                if not inst.is_pool_container:
+                    # Demand container — lowest priority
+                    candidates.append((0, inst))
+                elif self._get_state_priority(service_id, inst.pool_state) < target_prio:
+                    # Lower-priority pool container
+                    candidates.append((self._get_state_priority(service_id, inst.pool_state), inst))
+
+        # Sort: lowest priority first
+        candidates.sort(key=lambda x: (x[0], x[1].created_at))
+
+        for _, inst in candidates:
+            if freed >= needed:
+                break
+            lm.evict_instance(inst)
+            freed += 1
+            # Update pool target for evicted pool containers
+            if inst.is_pool_container:
+                old_target = self._pool_targets.get(service_id, {}).get(inst.pool_state, 0)
+                if old_target > 0:
+                    current_count = self._count_pool_containers(service_id, inst.pool_state)
+                    # Reduce target to match current count (don't refill evicted)
+                    self._pool_targets[service_id][inst.pool_state] = min(old_target, current_count)
+
+        return freed
+
     def _fill_pool_to_target_count(self, service_id: str, target_state: str,
                                     count: int, pool_state: str | None = None) -> None:
-        """Create exactly `count` containers with given pool_state."""
+        """Create exactly `count` containers with given pool_state.
+
+        If max_instances budget is exhausted, evicts lower-priority containers
+        (demand first, then lower pool states) to make room.
+        """
         lm = self.ctx.lifecycle_manager
         max_inst = self._max_instances.get(service_id, 0)
         total = self._count_total_instances(service_id)
@@ -159,7 +215,13 @@ class OpenWhiskPoolAutoscaler:
         def _has_budget():
             if max_inst <= 0:
                 return True
-            return (total + created) < max_inst
+            return (total + created - freed) < max_inst
+
+        # Try to free slots if needed
+        freed = 0
+        if max_inst > 0 and (total + count) > max_inst:
+            needed = min(count, total + count - max_inst)
+            freed = self._evict_lower_priority_for_budget(service_id, target_state, needed)
 
         if self.pool_mode == "global":
             placement = self.ctx.placement_strategy

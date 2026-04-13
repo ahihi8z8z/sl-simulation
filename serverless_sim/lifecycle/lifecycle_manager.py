@@ -37,6 +37,24 @@ class LifecycleManager:
         self.running_cpu_seconds: float = 0.0
         self.running_memory_seconds: float = 0.0
 
+    def flush_resource_seconds(self) -> None:
+        """Accumulate resource-seconds for all alive instances up to now.
+
+        Updates each instance's state_entered_at so the same time period
+        is not double-counted on the next flush or state transition.
+        """
+        now = self.ctx.env.now
+        for node_id, instances in self.instances.items():
+            for inst in instances:
+                time_in_state = now - inst.state_entered_at
+                if time_in_state > 0:
+                    self.total_cpu_seconds += time_in_state * inst.allocated_cpu
+                    self.total_memory_seconds += time_in_state * inst.allocated_memory
+                    if inst.state == "running":
+                        self.running_cpu_seconds += time_in_state * inst.allocated_cpu
+                        self.running_memory_seconds += time_in_state * inst.allocated_memory
+                    inst.state_entered_at = now
+
     def _get_sm(self, service_id: str) -> OpenWhiskExtendedStateMachine:
         """Get the state machine for a service."""
         return self.ctx.workload_manager.services[service_id].state_machine

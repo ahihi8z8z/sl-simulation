@@ -136,6 +136,7 @@ def plot_container_comparison(logs: list[dict], labels: list[str], output_dir: s
         axes = [axes]
 
     state_colors = {"prewarm": "#2196F3", "warm": "#F44336", "running": "#FF9800"}
+    _legend_handles, _legend_labels = [], []
 
     for ax, log, label in zip(axes, logs, labels):
         metrics = log.get("metrics")
@@ -191,9 +192,10 @@ def plot_container_comparison(logs: list[dict], labels: list[str], output_dir: s
 
     axes[-1].set_xlabel("Time (hours)")
 
-    fig.legend(_legend_handles, _legend_labels, loc="upper center",
-               ncol=len(_legend_labels), fontsize=8, frameon=False,
-               bbox_to_anchor=(0.5, 1.0))
+    if _legend_handles:
+        fig.legend(_legend_handles, _legend_labels, loc="upper center",
+                   ncol=len(_legend_labels), fontsize=8, frameon=False,
+                   bbox_to_anchor=(0.5, 1.0))
     plt.tight_layout()
     fig.subplots_adjust(top=0.93)
     fig.savefig(os.path.join(output_dir, "comparison_containers.png"), dpi=150)
@@ -238,6 +240,34 @@ def plot_idle_window(logs: list[dict], labels: list[str], output_dir: str) -> No
     print(f"  Saved: comparison_idle_window.png")
 
 
+def plot_latency_cdf(logs: list[dict], labels: list[str], output_dir: str) -> None:
+    """CDF of cold-start request latency (execution_start - arrival)."""
+    fig, ax = plt.subplots(figsize=(10, 5))
+
+    for log, label, color in zip(logs, labels, COLORS):
+        trace = log.get("trace")
+        if trace is None or len(trace) == 0:
+            continue
+        completed = trace[trace["status"] == "completed"]
+        cold = completed[completed["cold_start"] == True]
+        if len(cold) == 0:
+            continue
+        lat = (cold["execution_start_time"] - cold["arrival_time"]).sort_values()
+        cdf = np.arange(1, len(lat) + 1) / len(lat)
+        ax.plot(lat.values, cdf, label=label, color=color, linewidth=1.5)
+
+    ax.set_xlabel("Cold Start Latency (s)")
+    ax.set_ylabel("CDF")
+    ax.set_title("Cold Start Latency CDF")
+    ax.legend()
+    ax.grid(alpha=0.3)
+
+    plt.tight_layout()
+    fig.savefig(os.path.join(output_dir, "comparison_latency_cdf.png"), dpi=150)
+    plt.close(fig)
+    print(f"  Saved: comparison_latency_cdf.png")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Compare simulation logs")
     parser.add_argument("log_dirs", nargs="+", help="Log directories to compare")
@@ -256,6 +286,7 @@ def main():
     plot_latency_bar(logs, labels, args.output_dir)
     plot_container_comparison(logs, labels, args.output_dir, smooth=args.smooth)
     plot_idle_window(logs, labels, args.output_dir)
+    plot_latency_cdf(logs, labels, args.output_dir)
     print(f"\nAll plots in {args.output_dir}/")
 
 

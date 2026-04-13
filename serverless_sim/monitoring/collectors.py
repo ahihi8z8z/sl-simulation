@@ -101,6 +101,7 @@ class LifecycleCollector(BaseCollector):
                     svc_counts["running"] += 1
 
         lm = ctx.lifecycle_manager
+        lm.flush_resource_seconds()
         metrics: dict[str, float] = {
             "lifecycle.instances_total": total_instances,
             "lifecycle.instances_evicted": lm._evicted_count,
