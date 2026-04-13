@@ -51,6 +51,9 @@ class ContainerInstance:
         # Pool membership: None = demand container, "prewarm"/"warm" = pool container
         self.pool_state: Optional[str] = None
 
+        # Idle timer generation: incremented on each serve, timer checks match
+        self._idle_timer_gen: int = 0
+
     @property
     def is_idle(self) -> bool:
         return self.active_requests == 0

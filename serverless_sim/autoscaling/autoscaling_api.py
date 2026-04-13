@@ -55,6 +55,3 @@ class AutoscalingAPI:
 
     def set_idle_timeout(self, service_id: str, value: float) -> None:
         self._autoscaler.set_idle_timeout(service_id, value)
-
-    def trigger_reconcile(self) -> None:
-        self._autoscaler.reconcile()

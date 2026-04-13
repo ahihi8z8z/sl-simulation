@@ -321,6 +321,9 @@ class LifecycleManager:
         """Mark instance as running, transition resources warm → running."""
         node = self.ctx.cluster_manager.get_node(instance.node_id)
 
+        # Invalidate any pending idle timer
+        instance._idle_timer_gen += 1
+
         # Only transition resources on first concurrent request
         if instance.active_requests == 0:
             self._transition_state(node, instance, "running")
@@ -342,10 +345,30 @@ class LifecycleManager:
             invocation.cold_start = True
             instance.cold_start = False
 
-        # If no more active requests, go back to warm
+        # If no more active requests, go back to warm and schedule idle check
         if instance.active_requests == 0:
             node = self.ctx.cluster_manager.get_node(instance.node_id)
             self._transition_state(node, instance, "warm")
+            self._schedule_idle_check(instance)
+
+    def _schedule_idle_check(self, instance: ContainerInstance) -> None:
+        """Schedule an idle timeout check for this container."""
+        if self.ctx.autoscaling_manager is None:
+            return
+        timeout = self.ctx.autoscaling_manager.get_idle_timeout(instance.service_id)
+        if timeout < 0:
+            return  # never evict
+        gen = instance._idle_timer_gen
+        self.ctx.env.process(self._idle_timer(instance, timeout, gen))
+
+    def _idle_timer(self, instance: ContainerInstance, timeout: float, gen: int):
+        """SimPy process: wait then evict/demote if still idle."""
+        if timeout > 0:
+            yield self.ctx.env.timeout(timeout)
+        # Check: still same generation (no new serve), still idle, not evicted
+        if instance._idle_timer_gen != gen or not instance.is_idle or instance.evicted:
+            return
+        self.ctx.autoscaling_manager.handle_idle_timeout(instance)
 
     # ------------------------------------------------------------------
     # Pool demotion

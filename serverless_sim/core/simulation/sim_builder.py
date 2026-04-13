@@ -61,7 +61,6 @@ class SimulationBuilder:
             pool_mode = auto_cfg.get("pool_mode", "per_node")
             autoscaler = OpenWhiskPoolAutoscaler(
                 ctx,
-                reconcile_interval=auto_cfg.get("reconcile_interval", 5.0),
                 pool_mode=pool_mode,
             )
             ctx.autoscaling_manager = autoscaler

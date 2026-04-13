@@ -65,14 +65,13 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
     n_runs = len(labels)
     width = 0.8 / n_runs
 
-    fig, ax = plt.subplots(figsize=(max(8, len(metric_names) * 3), 5))
+    fig, ax = plt.subplots(figsize=(max(10, len(metric_names) * 3), 5))
     for i, (label, color) in enumerate(zip(labels, COLORS)):
         values = [metrics_data[m][i] for m in metric_names]
         offset = (i - n_runs / 2 + 0.5) * width
         bars = ax.bar(x + offset, values, width, label=label, color=color, alpha=0.85)
-        ax.bar_label(bars, fmt="%.1f", fontsize=7)
+        ax.bar_label(bars, fmt="%.1f", fontsize=7, label_type="center")
 
-    ax.set_ylabel("%")
     ax.set_title("Performance Metrics Comparison")
     ax.set_xticks(x)
     ax.set_xticklabels(metric_names)
@@ -135,7 +134,7 @@ def plot_latency_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
         bars = ax.bar(x, values, width=0.6, yerr=errs,
                       color=[COLORS[i % len(COLORS)] for i in range(n_runs)],
                       alpha=0.85, capsize=3)
-        ax.bar_label(bars, fmt="%.1f", fontsize=8)
+        ax.bar_label(bars, fmt="%.1f", fontsize=8, label_type="center")
         ax.set_title(metric)
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=30, ha="right")

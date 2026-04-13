@@ -26,11 +26,9 @@ class OpenWhiskPoolAutoscaler:
     3. LRU eviction when node is over memory (prefers demand containers first)
     """
 
-    def __init__(self, ctx: SimContext, reconcile_interval: float = 5.0,
-                 pool_mode: str = "per_node"):
+    def __init__(self, ctx: SimContext, pool_mode: str = "per_node", **kwargs):
         self.ctx = ctx
         self.logger = ctx.logger
-        self.reconcile_interval = reconcile_interval
         self.pool_mode = pool_mode
 
         # Per-service min/max instances (from service config)
@@ -77,60 +75,20 @@ class OpenWhiskPoolAutoscaler:
             min_inst = self._min_instances.get(svc_id, 0)
             if min_inst > 0:
                 self._fill_pool_to_target_count(svc_id, "warm", min_inst, pool_state="warm")
-        self.ctx.env.process(self._reconcile_loop())
 
-    def _reconcile_loop(self):
-        while True:
-            yield self.ctx.env.timeout(self.reconcile_interval)
-            self.reconcile()
+    def handle_idle_timeout(self, instance) -> None:
+        """Called by lifecycle manager when idle timer fires.
 
-    def reconcile(self) -> None:
-        """Run one reconcile cycle across all nodes.
-
-        1. Demand containers idle → evict (respects min_instances)
-        2. Pool containers idle → demote to pool_state (NOT evict)
-        3. LRU eviction under memory pressure (prefer demand first)
+        Demand containers → evict. Pool containers → demote to pool_state.
         """
-        now = self.ctx.env.now
         lm = self.ctx.lifecycle_manager
-
-        for node in self.ctx.cluster_manager.get_enabled_nodes():
-            # 1. Idle timeout: demand containers → evict
-            for inst in list(lm.get_instances_for_node(node.node_id)):
-                if inst.state == "warm" and inst.is_idle and not inst.is_pool_container:
-                    timeout = self._idle_timeout.get(inst.service_id, 60.0)
-                    if timeout < 0:
-                        continue
-                    if (now - inst.last_used_at) >= timeout:
-                        alive_count = self._count_alive_instances(inst.service_id)
-                        min_inst = self._min_instances.get(inst.service_id, 0)
-                        if alive_count <= min_inst:
-                            continue
-                        lm.evict_instance(inst)
-
-            # 2. Idle timeout: pool containers → demote to pool_state
-            for inst in list(lm.get_instances_for_node(node.node_id)):
-                if inst.state == "warm" and inst.is_idle and inst.is_pool_container:
-                    if inst.pool_state == "warm":
-                        continue  # already at pool_state
-                    timeout = self._idle_timeout.get(inst.service_id, 60.0)
-                    if timeout < 0:
-                        continue
-                    if (now - inst.last_used_at) >= timeout:
-                        lm.demote_to_pool_state(inst)
-
-            # 3. LRU eviction under memory pressure (prefer demand first)
-            while node.available.memory < 0:
-                instances = lm.get_instances_for_node(node.node_id)
-                candidates = [
-                    i for i in instances
-                    if i.state in self._get_evictable_states(i.service_id) and i.is_idle
-                ]
-                if not candidates:
-                    break
-                # Sort: demand first (is_pool_container=False < True), then LRU
-                candidates.sort(key=lambda i: (i.is_pool_container, i.last_used_at))
-                lm.evict_instance(candidates[0])
+        if not instance.is_idle or instance.evicted:
+            return
+        if instance.is_pool_container:
+            if instance.pool_state != instance.state:
+                lm.demote_to_pool_state(instance)
+        else:
+            lm.evict_instance(instance)
 
     # ------------------------------------------------------------------
     # Pool fill (only on explicit API calls)
