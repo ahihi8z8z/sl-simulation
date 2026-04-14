@@ -31,12 +31,9 @@ class WorkloadManager:
         stop_time : float | None
             If set, generators stop producing requests after this time.
         """
-        start_delay = self.ctx.config.get("workload", {}).get("start_delay", 0)
         for service in self.services.values():
-            self.generator.start_for_service(service, stop_time=stop_time,
-                                              start_delay=start_delay)
-            self.ctx.logger.info("Started generator for service: %s (delay=%.1fs)",
-                                 service.service_id, start_delay)
+            self.generator.start_for_service(service, stop_time=stop_time)
+            self.ctx.logger.info("Started generator for service: %s", service.service_id)
 
     @classmethod
     def from_config(cls, ctx: SimContext) -> "WorkloadManager":

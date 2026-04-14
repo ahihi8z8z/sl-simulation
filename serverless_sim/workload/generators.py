@@ -15,8 +15,7 @@ class BaseGenerator:
     def attach(self, ctx: SimContext) -> None:
         raise NotImplementedError
 
-    def start_for_service(self, service: ServiceClass, stop_time: float | None = None,
-                          start_delay: float = 0) -> None:
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
         raise NotImplementedError
 
 
@@ -38,18 +37,13 @@ class GammaArrivalGenerator(BaseGenerator):
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
 
-    def start_for_service(self, service: ServiceClass, stop_time: float | None = None,
-                          start_delay: float = 0) -> None:
-        self.ctx.env.process(self._arrival_loop(service, stop_time, start_delay))
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
+        self.ctx.env.process(self._arrival_loop(service, stop_time))
 
-    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None,
-                      start_delay: float = 0):
+    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None):
         ctx = self.ctx
         rng = ctx.rng
         env = ctx.env
-
-        if start_delay > 0:
-            yield env.timeout(start_delay)
 
         # numpy gamma: shape=alpha, scale=1/beta
         scale = 1.0 / self._beta
@@ -101,19 +95,14 @@ class PoissonFixedSizeGenerator(BaseGenerator):
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
 
-    def start_for_service(self, service: ServiceClass, stop_time: float | None = None,
-                          start_delay: float = 0) -> None:
-        self.ctx.env.process(self._arrival_loop(service, stop_time, start_delay))
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
+        self.ctx.env.process(self._arrival_loop(service, stop_time))
 
-    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None,
-                      start_delay: float = 0):
+    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None):
         """SimPy process: generate requests with exponential inter-arrival."""
         ctx = self.ctx
         rng = ctx.rng
         env = ctx.env
-
-        if start_delay > 0:
-            yield env.timeout(start_delay)
 
         mean_interval = 1.0 / service.arrival_rate
 

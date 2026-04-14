@@ -16,11 +16,8 @@ class SimulationEngine:
         self._wall_end: float | None = None
 
     def setup(self) -> None:
-        """Start all SimPy processes."""
-        duration = self.ctx.config["simulation"]["duration"]
-        start_delay = self.ctx.config.get("workload", {}).get("start_delay", 0)
+        """Start system processes (no traffic yet)."""
         self.ctx.cluster_manager.start_all()
-        self.ctx.workload_manager.start(stop_time=duration + start_delay)
         self.ctx.monitor_manager.start()
         if self.ctx.autoscaling_manager:
             self.ctx.autoscaling_manager.start()
@@ -43,8 +40,17 @@ class SimulationEngine:
         config_sim = self.ctx.config["simulation"]
         duration = config_sim["duration"]
         start_delay = self.ctx.config.get("workload", {}).get("start_delay", 0)
+
+        # Warmup: let system (pools, autoscaler) initialize before traffic
+        if start_delay > 0:
+            self.ctx.env.run(until=start_delay)
+            self.ctx.logger.info("SimulationEngine: warmup complete at t=%.1f", start_delay)
+
+        # Start traffic after warmup
+        self.ctx.workload_manager.start(stop_time=start_delay + duration)
+
         if until is None:
-            until = duration + start_delay
+            until = start_delay + duration
 
         drain_timeout = self._get_drain_timeout()
         total = until + drain_timeout
