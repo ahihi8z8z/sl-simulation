@@ -18,8 +18,9 @@ class SimulationEngine:
     def setup(self) -> None:
         """Start all SimPy processes."""
         duration = self.ctx.config["simulation"]["duration"]
+        start_delay = self.ctx.config.get("workload", {}).get("start_delay", 0)
         self.ctx.cluster_manager.start_all()
-        self.ctx.workload_manager.start(stop_time=duration)
+        self.ctx.workload_manager.start(stop_time=duration + start_delay)
         self.ctx.monitor_manager.start()
         if self.ctx.autoscaling_manager:
             self.ctx.autoscaling_manager.start()
@@ -41,8 +42,9 @@ class SimulationEngine:
         """
         config_sim = self.ctx.config["simulation"]
         duration = config_sim["duration"]
+        start_delay = self.ctx.config.get("workload", {}).get("start_delay", 0)
         if until is None:
-            until = duration
+            until = duration + start_delay
 
         drain_timeout = self._get_drain_timeout()
         total = until + drain_timeout
