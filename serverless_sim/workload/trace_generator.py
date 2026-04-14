@@ -135,11 +135,12 @@ class TraceReplayGenerator(BaseGenerator):
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
 
-    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None,
+                          start_delay: float = 0) -> None:
         """Start replay for a specific service (filters records by function_id)."""
         records = [r for r in self._records if r.function_id == service.service_id]
         if records:
-            self.ctx.env.process(self._replay_loop(service, records, stop_time))
+            self.ctx.env.process(self._replay_loop(service, records, stop_time, start_delay))
 
     def start_all(self, stop_time: float | None = None) -> None:
         """Start replay for ALL function_ids in the trace (no service filter).
@@ -166,10 +167,13 @@ class TraceReplayGenerator(BaseGenerator):
         service: ServiceClass,
         records: list[TraceRecord],
         stop_time: float | None,
+        start_delay: float = 0,
     ):
         """SimPy process: emit requests at trace timestamps."""
         ctx = self.ctx
         env = ctx.env
+        if start_delay > 0:
+            yield env.timeout(start_delay)
 
         for record in records:
             # Wait until the record's timestamp
@@ -345,6 +349,7 @@ class AggregateTraceGenerator(BaseGenerator):
         service: ServiceClass,
         records: list[AggregateRecord],
         stop_time: float | None,
+        start_delay: float = 0,
     ):
         """SimPy process: distribute requests evenly within each minute.
 
@@ -354,6 +359,8 @@ class AggregateTraceGenerator(BaseGenerator):
         """
         ctx = self.ctx
         env = ctx.env
+        if start_delay > 0:
+            yield env.timeout(start_delay)
         remainder = 0.0
 
         for record in records:
