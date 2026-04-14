@@ -8,25 +8,75 @@
     {
       "service_id": "svc-hello",
       "arrival_rate": 5.0,
-      "job_size": 0.1,
       "max_concurrency": 4,
       "min_instances": 1,
       "max_instances": 0,
       "lifecycle": {
-        "cold_start_chain": ["null", "prewarm", "warm"],
+        "cold_start_chain": [
+          "null",
+          "prewarm",
+          "warm"
+        ],
         "states": [
-          {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
-          {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 128},
-          {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 256, "service_bound": true, "reusable": true},
-          {"name": "running", "category": "transient", "cpu": 1.0, "memory": 256, "service_bound": true}
+          {
+            "name": "null",
+            "category": "stable",
+            "cpu": 0,
+            "memory": 0
+          },
+          {
+            "name": "prewarm",
+            "category": "stable",
+            "cpu": 0,
+            "memory": 128
+          },
+          {
+            "name": "warm",
+            "category": "stable",
+            "cpu": 0.1,
+            "memory": 256,
+            "service_bound": true,
+            "reusable": true
+          },
+          {
+            "name": "running",
+            "category": "transient",
+            "cpu": 1.0,
+            "memory": 256,
+            "service_bound": true
+          }
         ],
         "transitions": [
-          {"from": "null", "to": "prewarm", "time": 0.5},
-          {"from": "prewarm", "to": "warm", "time": 0.3},
-          {"from": "warm", "to": "running", "time": 0.0},
-          {"from": "running", "to": "warm", "time": 0.0},
-          {"from": "warm", "to": "evicted", "time": 0.0},
-          {"from": "prewarm", "to": "evicted", "time": 0.0}
+          {
+            "from": "null",
+            "to": "prewarm",
+            "time": 0.5
+          },
+          {
+            "from": "prewarm",
+            "to": "warm",
+            "time": 0.3
+          },
+          {
+            "from": "warm",
+            "to": "running",
+            "time": 0.0
+          },
+          {
+            "from": "running",
+            "to": "warm",
+            "time": 0.0
+          },
+          {
+            "from": "warm",
+            "to": "evicted",
+            "time": 0.0
+          },
+          {
+            "from": "prewarm",
+            "to": "evicted",
+            "time": 0.0
+          }
         ]
       }
     }
@@ -47,5 +97,9 @@
   "monitoring": {
     "interval": 1.0,
     "max_history_length": 1000
+  },
+  "service_time": {
+    "mode": "fixed",
+    "duration": 0.1
   }
 }

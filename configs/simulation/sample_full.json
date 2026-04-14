@@ -8,70 +8,166 @@
     {
       "service_id": "svc-api",
       "arrival_rate": 10.0,
-      "job_size": 0.05,
       "max_concurrency": 8,
       "min_instances": 2,
       "max_instances": 0,
       "autoscaling_defaults": {
         "idle_timeout": 30.0,
-        "pool_targets": {"prewarm": 2}
+        "pool_targets": {
+          "prewarm": 2
+        }
       },
       "lifecycle": {
-        "cold_start_chain": ["null", "prewarm", "warm"],
+        "cold_start_chain": [
+          "null",
+          "prewarm",
+          "warm"
+        ],
         "states": [
-          {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
-          {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 64},
-          {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 256, "service_bound": true, "reusable": true},
-          {"name": "running", "category": "transient", "cpu": 0.5, "memory": 256, "service_bound": true}
+          {
+            "name": "null",
+            "category": "stable",
+            "cpu": 0,
+            "memory": 0
+          },
+          {
+            "name": "prewarm",
+            "category": "stable",
+            "cpu": 0,
+            "memory": 64
+          },
+          {
+            "name": "warm",
+            "category": "stable",
+            "cpu": 0.1,
+            "memory": 256,
+            "service_bound": true,
+            "reusable": true
+          },
+          {
+            "name": "running",
+            "category": "transient",
+            "cpu": 0.5,
+            "memory": 256,
+            "service_bound": true
+          }
         ],
         "transitions": [
-          {"from": "null", "to": "prewarm", "time": 0.3},
-          {"from": "prewarm", "to": "warm", "time": 0.2}
+          {
+            "from": "null",
+            "to": "prewarm",
+            "time": 0.3
+          },
+          {
+            "from": "prewarm",
+            "to": "warm",
+            "time": 0.2
+          }
         ]
       }
     },
     {
       "service_id": "svc-worker",
       "arrival_rate": 2.0,
-      "job_size": 1.0,
       "max_concurrency": 2,
       "min_instances": 1,
       "max_instances": 0,
       "autoscaling_defaults": {
         "idle_timeout": 60.0,
-        "pool_targets": {"prewarm": 1, "code_loaded": 1}
+        "pool_targets": {
+          "prewarm": 1,
+          "code_loaded": 1
+        }
       },
       "lifecycle": {
-        "cold_start_chain": ["null", "prewarm", "code_loaded", "warm"],
+        "cold_start_chain": [
+          "null",
+          "prewarm",
+          "code_loaded",
+          "warm"
+        ],
         "transition_profile": "configs/simulation/sample_transition_profile.csv",
         "state_profile": "configs/simulation/sample_state_resources.csv",
         "states": [
-          {"name": "null", "category": "stable"},
-          {"name": "prewarm", "category": "stable"},
-          {"name": "code_loaded", "category": "stable", "service_bound": true},
-          {"name": "warm", "category": "stable", "service_bound": true, "reusable": true},
-          {"name": "running", "category": "transient", "service_bound": true}
+          {
+            "name": "null",
+            "category": "stable"
+          },
+          {
+            "name": "prewarm",
+            "category": "stable"
+          },
+          {
+            "name": "code_loaded",
+            "category": "stable",
+            "service_bound": true
+          },
+          {
+            "name": "warm",
+            "category": "stable",
+            "service_bound": true,
+            "reusable": true
+          },
+          {
+            "name": "running",
+            "category": "transient",
+            "service_bound": true
+          }
         ]
       }
     },
     {
       "service_id": "svc-cron",
       "arrival_rate": 0.5,
-      "job_size": 0.5,
       "max_concurrency": 1,
       "min_instances": 0,
       "max_instances": 0,
       "lifecycle": {
-        "cold_start_chain": ["null", "prewarm", "warm"],
+        "cold_start_chain": [
+          "null",
+          "prewarm",
+          "warm"
+        ],
         "states": [
-          {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
-          {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 128},
-          {"name": "warm", "category": "stable", "cpu": 0.2, "memory": 512, "service_bound": true, "reusable": true},
-          {"name": "running", "category": "transient", "cpu": 1.0, "memory": 512, "service_bound": true}
+          {
+            "name": "null",
+            "category": "stable",
+            "cpu": 0,
+            "memory": 0
+          },
+          {
+            "name": "prewarm",
+            "category": "stable",
+            "cpu": 0,
+            "memory": 128
+          },
+          {
+            "name": "warm",
+            "category": "stable",
+            "cpu": 0.2,
+            "memory": 512,
+            "service_bound": true,
+            "reusable": true
+          },
+          {
+            "name": "running",
+            "category": "transient",
+            "cpu": 1.0,
+            "memory": 512,
+            "service_bound": true
+          }
         ],
         "transitions": [
-          {"from": "null", "to": "prewarm", "time": 0.4},
-          {"from": "prewarm", "to": "warm", "time": 0.3}
+          {
+            "from": "null",
+            "to": "prewarm",
+            "time": 0.4
+          },
+          {
+            "from": "prewarm",
+            "to": "warm",
+            "time": 0.3
+          }
         ]
       }
     }
@@ -107,5 +203,9 @@
   "monitoring": {
     "interval": 1.0,
     "max_history_length": 1000
+  },
+  "service_time": {
+    "mode": "fixed",
+    "duration": 0.5
   }
 }
