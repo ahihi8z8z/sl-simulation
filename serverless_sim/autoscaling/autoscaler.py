@@ -39,6 +39,9 @@ class OpenWhiskPoolAutoscaler:
         self._idle_timeout: dict[str, float] = {}
         self._pool_targets: dict[str, dict[str, int]] = {}
 
+        # Pending instances: scheduled but not yet created by SimPy
+        self._pending: dict[str, int] = {}
+
         # Initialize from config
         for svc in ctx.workload_manager.services.values():
             svc_cfg = self._find_service_config(svc.service_id)
@@ -171,18 +174,20 @@ class OpenWhiskPoolAutoscaler:
         """
         lm = self.ctx.lifecycle_manager
         max_inst = self._max_instances.get(service_id, 0)
-        total = self._count_total_instances(service_id)
-        created = 0
+        pending = self._pending.get(service_id, 0)
+
+        def _total():
+            return self._count_total_instances(service_id) + self._pending.get(service_id, 0)
 
         def _has_budget():
             if max_inst <= 0:
                 return True
-            return (total + created - freed) < max_inst
+            return _total() < max_inst
 
         # Try to free slots if needed
         freed = 0
-        if max_inst > 0 and (total + count) > max_inst:
-            needed = min(count, total + count - max_inst)
+        if max_inst > 0 and (_total() + count) > max_inst:
+            needed = min(count, _total() + count - max_inst)
             freed = self._evict_lower_priority_for_budget(service_id, target_state, needed)
 
         if self.pool_mode == "global":
@@ -194,10 +199,10 @@ class OpenWhiskPoolAutoscaler:
                 node = placement.select_node(nodes, service_id, self.ctx)
                 if node is None:
                     break
+                self._pending[service_id] = self._pending.get(service_id, 0) + 1
                 lm.prepare_instance_for_service(node, service_id,
                                                  target_state=target_state,
                                                  pool_state=pool_state)
-                created += 1
         else:
             nodes = self.ctx.cluster_manager.get_enabled_nodes()
             service = self.ctx.workload_manager.services[service_id]
@@ -208,10 +213,10 @@ class OpenWhiskPoolAutoscaler:
                 placed = False
                 for node in nodes:
                     if node.can_fit_flavor(service.peak_cpu, service.peak_memory):
+                        self._pending[service_id] = self._pending.get(service_id, 0) + 1
                         lm.prepare_instance_for_service(node, service_id,
                                                          target_state=target_state,
                                                          pool_state=pool_state)
-                        created += 1
                         placed = True
                         break
                 if not placed:

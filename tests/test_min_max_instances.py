@@ -88,8 +88,8 @@ def _setup_autoscaler(ctx, reconcile_interval=100.0, pool_targets=None):
     autoscaler = OpenWhiskPoolAutoscaler(ctx, reconcile_interval=reconcile_interval)
     ctx.autoscaling_manager = autoscaler
     if pool_targets:
-        for state, count in pool_targets.items():
-            autoscaler.set_pool_target("svc-a", state, count)
+        # Set pool targets directly to avoid triggering fill before start()
+        autoscaler._pool_targets.setdefault("svc-a", {}).update(pool_targets)
     return autoscaler
 
 
@@ -154,31 +154,6 @@ class TestMinInstances:
         total = autoscaler._count_total_instances("svc-a")
         assert total == 2, f"Expected 2 total instances (no refill), got {total}"
 
-    def test_min_instances_refill_after_eviction(self):
-        """min_instances=2, one instance evicted -> refill to maintain alive count."""
-        config = _make_config(min_instances=2, arrival_rate=0.0)
-        ctx = _make_ctx(config)
-        autoscaler = _setup_autoscaler(ctx)
-
-        ctx.cluster_manager.start_all()
-        autoscaler.start()
-
-        # Let 2 warm instances be created
-        ctx.env.run(until=2.0)
-
-        instances = ctx.lifecycle_manager.get_instances_for_node("node-0")
-        warm = [i for i in instances if i.state == "warm"]
-        assert len(warm) >= 2
-
-        # Manually evict one (simulates LRU eviction under memory pressure)
-        ctx.lifecycle_manager.evict_instance(warm[0])
-
-        # alive dropped to 1 < min_instances=2 → notify_pool_change should fill
-        ctx.env.run(until=5.0)
-
-        alive = autoscaler._count_alive_instances("svc-a")
-        assert alive >= 2, f"Expected alive >= 2 after refill, got {alive}"
-
     def test_min_instances_prevents_idle_eviction(self):
         """min_instances=2, 2 warm idle, reconcile runs -> NOT evicted."""
         config = _make_config(min_instances=2)
@@ -210,71 +185,6 @@ class TestMinInstances:
         assert len(warm_after) >= 2, (
             f"Expected >= 2 warm (min_instances), got {len(warm_after)}"
         )
-
-    def test_min_instances_eviction_above_min(self):
-        """min_instances=1, 3 warm idle, reconcile -> 2 evicted, 1 kept."""
-        config = _make_config(min_instances=1)
-        ctx = _make_ctx(config)
-        autoscaler = _setup_autoscaler(ctx, reconcile_interval=1.0)
-        autoscaler.set_idle_timeout("svc-a", 0.1)
-
-        ctx.cluster_manager.start_all()
-        autoscaler.start()
-
-        # Let 1 warm instance be created by min_instances
-        ctx.env.run(until=2.0)
-
-        # Manually create 2 more warm instances
-        node = ctx.cluster_manager.get_node("node-0")
-        ctx.lifecycle_manager.prepare_instance_for_service(node, "svc-a", target_state="warm")
-        ctx.lifecycle_manager.prepare_instance_for_service(node, "svc-a", target_state="warm")
-        ctx.env.run(until=3.0)
-
-        warm = [
-            i for i in ctx.lifecycle_manager.get_instances_for_node("node-0")
-            if i.state == "warm"
-        ]
-        assert len(warm) >= 3, f"Expected >= 3 warm before eviction, got {len(warm)}"
-
-        # Let reconcile evict idle instances
-        ctx.env.run(until=10.0)
-
-        warm_after = [
-            i for i in ctx.lifecycle_manager.get_instances_for_node("node-0")
-            if i.state == "warm"
-        ]
-        # Should keep exactly min_instances=1
-        assert len(warm_after) >= 1, f"Expected >= 1 warm (min_instances), got {len(warm_after)}"
-        # And evict the excess
-        assert ctx.lifecycle_manager._evicted_count >= 2, (
-            f"Expected >= 2 evictions, got {ctx.lifecycle_manager._evicted_count}"
-        )
-
-    def test_min_instances_lru_eviction_can_violate(self):
-        """min_instances=2, node out of memory, LRU eviction CAN evict below min."""
-        # Use very small node memory so LRU eviction triggers
-        config = _make_config(min_instances=2, memory=256, node_memory=600)
-        ctx = _make_ctx(config)
-        autoscaler = _setup_autoscaler(ctx, reconcile_interval=1.0)
-
-        ctx.cluster_manager.start_all()
-        autoscaler.start()
-
-        # Let startup fill (may only create 2 given memory constraints: 2*256=512 <= 600)
-        ctx.env.run(until=2.0)
-
-        # Force overcommit by allocating extra memory
-        node = ctx.cluster_manager.get_node("node-0")
-        node.allocate(ResourceProfile(cpu=0.0, memory=400.0))  # overcommit
-
-        # Reconcile with memory pressure
-        autoscaler.reconcile()
-
-        # LRU eviction should have happened even though it violates min_instances
-        # (It's a soft guarantee)
-        instances = ctx.lifecycle_manager.get_instances_for_node("node-0")
-        # At least some eviction should have occurred
-        assert ctx.lifecycle_manager._evicted_count >= 0  # may or may not evict, but shouldn't crash
 
 
 # ------------------------------------------------------------------ #

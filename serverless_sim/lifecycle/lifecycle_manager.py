@@ -221,6 +221,12 @@ class LifecycleManager:
         inst.pool_state = pool_state
         self._get_instances(node.node_id).append(inst)
 
+        # Decrement pending counter (instance is now tracked in instance list)
+        if self.ctx.autoscaling_manager:
+            pending = self.ctx.autoscaling_manager._pending
+            if pending.get(service_id, 0) > 0:
+                pending[service_id] -= 1
+
         # Reserve flavor resources on node (fixed for lifetime of container)
         inst.flavor_cpu = service.peak_cpu
         inst.flavor_memory = service.peak_memory
