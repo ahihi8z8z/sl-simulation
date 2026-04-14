@@ -67,6 +67,12 @@ class ClusterCollector(BaseCollector):
         metrics["cluster.memory_used_running"] = running_mem
         metrics["cluster.memory_utilization"] = used_mem / total_mem if total_mem > 0 else 0.0
 
+        # Flavor resource tracking
+        flavor_cpu = sum(n.flavor_cpu_used for n in nodes)
+        flavor_mem = sum(n.flavor_memory_used for n in nodes)
+        metrics["cluster.flavor_cpu_used"] = flavor_cpu
+        metrics["cluster.flavor_memory_used"] = flavor_mem
+
         return metrics
 
 

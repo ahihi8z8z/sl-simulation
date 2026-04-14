@@ -68,12 +68,19 @@ class SummaryWriter:
             cluster_cpu = sum(n.capacity.cpu for n in nodes)
             cluster_mem = sum(n.capacity.memory for n in nodes)
 
+            flavor_cpu = sum(n.flavor_cpu_used for n in nodes)
+            flavor_mem = sum(n.flavor_memory_used for n in nodes)
+
             summary["cluster_utilization"] = {
                 "cpu_total": cluster_cpu,
                 "memory_total": cluster_mem,
                 "nodes_enabled": len(nodes),
                 "avg_cpu_utilization": round(eff["total_cpu_seconds"] / (sim_end_time * cluster_cpu), 4) if cluster_cpu > 0 and sim_end_time > 0 else 0.0,
                 "avg_memory_utilization": round(eff["total_memory_seconds"] / (sim_end_time * cluster_mem), 4) if cluster_mem > 0 and sim_end_time > 0 else 0.0,
+                "flavor_cpu_used": round(flavor_cpu, 4),
+                "flavor_memory_used": round(flavor_mem, 2),
+                "flavor_cpu_utilization": round(flavor_cpu / cluster_cpu, 4) if cluster_cpu > 0 else 0.0,
+                "flavor_memory_utilization": round(flavor_mem / cluster_mem, 4) if cluster_mem > 0 else 0.0,
             }
 
             # Lifecycle: count actual instances from lifecycle_manager

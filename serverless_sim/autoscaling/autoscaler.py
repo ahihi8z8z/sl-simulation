@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from serverless_sim.cluster.resource_profile import ResourceProfile
+
 from serverless_sim.lifecycle.container_instance import ContainerInstance
 
 if TYPE_CHECKING:
@@ -201,14 +201,13 @@ class OpenWhiskPoolAutoscaler:
         else:
             nodes = self.ctx.cluster_manager.get_enabled_nodes()
             service = self.ctx.workload_manager.services[service_id]
-            mem_req = ResourceProfile(cpu=0.0, memory=service.peak_memory)
             for _ in range(count):
                 if not _has_budget():
                     break
-                # Round-robin across nodes that have capacity
+                # Round-robin across nodes that have flavor capacity
                 placed = False
                 for node in nodes:
-                    if node.available.can_fit(mem_req):
+                    if node.can_fit_flavor(service.peak_cpu, service.peak_memory):
                         lm.prepare_instance_for_service(node, service_id,
                                                          target_state=target_state,
                                                          pool_state=pool_state)

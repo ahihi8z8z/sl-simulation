@@ -226,9 +226,9 @@ class MultiDiscreteEnv(gym.Env):
         ctx = self._engine.ctx
         mapper = self._action_mapper
 
-        # Calculate max containers cluster can hold
+        # Calculate max containers cluster can hold (based on flavor capacity)
         nodes = ctx.cluster_manager.get_enabled_nodes()
-        total_available_mem = sum(n.available.memory for n in nodes)
+        total_available_mem = sum(n.capacity.memory - n.flavor_memory_used for n in nodes)
 
         masks = []
         for i, (svc_id, action_type, state) in enumerate(mapper._action_map):

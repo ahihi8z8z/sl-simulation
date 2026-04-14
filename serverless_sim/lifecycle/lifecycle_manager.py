@@ -221,6 +221,11 @@ class LifecycleManager:
         inst.pool_state = pool_state
         self._get_instances(node.node_id).append(inst)
 
+        # Reserve flavor resources on node (fixed for lifetime of container)
+        inst.flavor_cpu = service.peak_cpu
+        inst.flavor_memory = service.peak_memory
+        node.reserve_flavor(inst.flavor_cpu, inst.flavor_memory)
+
         # Allocate null state resources (typically 0)
         null_res = self._state_resources(service_id, "null")
         if null_res.cpu > 0 or null_res.memory > 0:
@@ -415,6 +420,9 @@ class LifecycleManager:
             node.release(ResourceProfile(cpu=instance.allocated_cpu, memory=instance.allocated_memory))
             instance.allocated_cpu = 0.0
             instance.allocated_memory = 0.0
+
+        # Release flavor resources
+        node.release_flavor(instance.flavor_cpu, instance.flavor_memory)
 
         # Remove from instance list
         node_instances = self._get_instances(instance.node_id)

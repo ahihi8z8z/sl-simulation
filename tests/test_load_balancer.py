@@ -105,10 +105,9 @@ class TestShardingBalancer:
         lb.dispatch(inv0)
         primary_node_id = inv0.assigned_node_id
 
-        # Exhaust primary node's memory
+        # Exhaust primary node's flavor capacity
         primary_node = ctx.cluster_manager.get_node(primary_node_id)
-        from serverless_sim.cluster.resource_profile import ResourceProfile
-        primary_node.available = ResourceProfile(cpu=primary_node.available.cpu, memory=0.0)
+        primary_node.flavor_memory_used = primary_node.capacity.memory
 
         # Next dispatch should fallback
         inv1 = Invocation(request_id="r-fallback", service_id="svc-a",
@@ -119,13 +118,12 @@ class TestShardingBalancer:
         assert inv1.assigned_node_id != primary_node_id
 
     def test_drop_when_all_full(self):
-        """Drop when all nodes have no memory."""
+        """Drop when all nodes have no flavor capacity."""
         ctx = _make_ctx()
         lb = ShardingContainerPoolBalancer(ctx)
 
-        from serverless_sim.cluster.resource_profile import ResourceProfile
         for node in ctx.cluster_manager.get_enabled_nodes():
-            node.available = ResourceProfile(cpu=node.available.cpu, memory=0.0)
+            node.flavor_memory_used = node.capacity.memory
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
                          arrival_time=0.0, job_size=0.5, status="arrived")

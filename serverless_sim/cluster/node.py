@@ -43,6 +43,11 @@ class Node:
         self.allocated = ResourceProfile(cpu=0.0, memory=0.0)
         self.available = ResourceProfile(cpu=capacity.cpu, memory=capacity.memory)
 
+        # Flavor accounting — fixed reservation for placement decisions
+        # Initialized with reserved resources (always counted toward flavor)
+        self.flavor_cpu_used = compute_class.reserved_cpu
+        self.flavor_memory_used = compute_class.reserved_memory
+
         # Request queue (unbounded Store)
         self.queue: simpy.Store = simpy.Store(env)
 
@@ -89,6 +94,24 @@ class Node:
     def can_fit(self, request: ResourceProfile) -> bool:
         """Check if resources can be allocated without modifying state."""
         return self.available.can_fit(request)
+
+    def can_fit_flavor(self, cpu: float, memory: float) -> bool:
+        """Check if node has enough flavor capacity for a new container."""
+        return (self.capacity.cpu - self.flavor_cpu_used >= cpu
+                and self.capacity.memory - self.flavor_memory_used >= memory)
+
+    def reserve_flavor(self, cpu: float, memory: float) -> None:
+        """Reserve flavor resources when creating a container."""
+        self.flavor_cpu_used += cpu
+        self.flavor_memory_used += memory
+
+    def release_flavor(self, cpu: float, memory: float) -> None:
+        """Release flavor resources when evicting a container."""
+        self.flavor_cpu_used -= cpu
+        self.flavor_memory_used -= memory
+        # Clamp to avoid float precision artifacts
+        self.flavor_cpu_used = max(0.0, self.flavor_cpu_used)
+        self.flavor_memory_used = max(0.0, self.flavor_memory_used)
 
     @property
     def queue_depth(self) -> int:
@@ -160,20 +183,20 @@ class Node:
                             )
                             return
 
-                # Check if node has enough memory for a new container
+                # Check if node has enough flavor capacity for a new container
                 service = self._ctx.workload_manager.services[invocation.service_id]
-                peak_mem = ResourceProfile(cpu=0.0, memory=service.peak_memory)
-                if not self.available.can_fit(peak_mem):
+                if not self.can_fit_flavor(service.peak_cpu, service.peak_memory):
                     invocation.dropped = True
                     invocation.drop_reason = "no_resources"
                     invocation.status = "dropped"
                     invocation.completion_time = self.env.now
                     self._ctx.request_table.finalize(invocation)
                     self.logger.debug(
-                        "t=%.3f | %s | DROP %s (no_resources, avail_mem=%.0f, need=%.0f)",
+                        "t=%.3f | %s | DROP %s (no_resources, flavor_cpu=%.1f/%.1f, flavor_mem=%.0f/%.0f)",
                         self.env.now, self.node_id,
                         invocation.request_id,
-                        self.available.memory, service.peak_memory,
+                        self.flavor_cpu_used, self.capacity.cpu,
+                        self.flavor_memory_used, self.capacity.memory,
                     )
                     return
 

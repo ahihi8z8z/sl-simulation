@@ -45,6 +45,10 @@ class ContainerInstance:
         self.allocated_cpu: float = 0.0
         self.allocated_memory: float = 0.0
 
+        # Flavor resources reserved on node (fixed, for placement decisions)
+        self.flavor_cpu: float = 0.0
+        self.flavor_memory: float = 0.0
+
         # Eviction flag — checked by in-flight _cold_start processes
         self.evicted: bool = False
 

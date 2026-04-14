@@ -154,7 +154,7 @@ class TestRoundRobinBalancer:
         ctx = _make_ctx(_make_config("round_robin"))
         lb = RoundRobinBalancer(ctx)
         for node in ctx.cluster_manager.get_enabled_nodes():
-            node.available = ResourceProfile(cpu=8.0, memory=0.0)
+            node.flavor_memory_used = node.capacity.memory
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
                          arrival_time=0.0, job_size=0.1, status="arrived")
@@ -165,9 +165,9 @@ class TestRoundRobinBalancer:
     def test_skips_full_node(self):
         ctx = _make_ctx(_make_config("round_robin"))
         lb = RoundRobinBalancer(ctx)
-        # Fill node-0 memory
+        # Fill node-0 flavor capacity
         node0 = ctx.cluster_manager.get_node("node-0")
-        node0.available = ResourceProfile(cpu=8.0, memory=0.0)
+        node0.flavor_memory_used = node0.capacity.memory
 
         node_ids = _dispatch_n(lb, ctx, 5)
         assert all(nid == "node-1" for nid in node_ids)
@@ -199,7 +199,7 @@ class TestLeastLoadedBalancer:
         ctx = _make_ctx(_make_config("least_loaded"))
         lb = LeastLoadedBalancer(ctx)
         for node in ctx.cluster_manager.get_enabled_nodes():
-            node.available = ResourceProfile(cpu=8.0, memory=0.0)
+            node.flavor_memory_used = node.capacity.memory
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
                          arrival_time=0.0, job_size=0.1, status="arrived")
@@ -229,7 +229,7 @@ class TestPowerOfTwoChoicesBalancer:
         ctx = _make_ctx(_make_config("power_of_two_choices"))
         lb = PowerOfTwoChoicesBalancer(ctx)
         for node in ctx.cluster_manager.get_enabled_nodes():
-            node.available = ResourceProfile(cpu=8.0, memory=0.0)
+            node.flavor_memory_used = node.capacity.memory
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
                          arrival_time=0.0, job_size=0.1, status="arrived")

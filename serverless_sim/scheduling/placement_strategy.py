@@ -27,36 +27,28 @@ class BasePlacementStrategy:
 
 
 class LeastLoadedPlacement(BasePlacementStrategy):
-    """Pick the node with the most available memory that can fit the service."""
+    """Pick the node with the most flavor capacity that can fit the service."""
 
     def select_node(self, nodes: list[Node], service_id: str, ctx: SimContext) -> Node | None:
-        from serverless_sim.cluster.resource_profile import ResourceProfile
-
         service = ctx.workload_manager.services[service_id]
-        mem_req = ResourceProfile(cpu=0.0, memory=service.peak_memory)
-
-        candidates = [n for n in nodes if n.available.can_fit(mem_req)]
+        candidates = [n for n in nodes if n.can_fit_flavor(service.peak_cpu, service.peak_memory)]
         if not candidates:
             return None
-        return max(candidates, key=lambda n: n.available.memory)
+        return max(candidates, key=lambda n: n.capacity.memory - n.flavor_memory_used)
 
 
 class BestFitPlacement(BasePlacementStrategy):
-    """Pick the node with the least available memory that can still fit the service.
+    """Pick the node with the least flavor capacity that can still fit the service.
 
-    Minimizes wasted memory per node — fills nodes tightly before moving to next.
+    Minimizes wasted capacity per node — fills nodes tightly before moving to next.
     """
 
     def select_node(self, nodes: list[Node], service_id: str, ctx: SimContext) -> Node | None:
-        from serverless_sim.cluster.resource_profile import ResourceProfile
-
         service = ctx.workload_manager.services[service_id]
-        mem_req = ResourceProfile(cpu=0.0, memory=service.peak_memory)
-
-        candidates = [n for n in nodes if n.available.can_fit(mem_req)]
+        candidates = [n for n in nodes if n.can_fit_flavor(service.peak_cpu, service.peak_memory)]
         if not candidates:
             return None
-        return min(candidates, key=lambda n: n.available.memory)
+        return min(candidates, key=lambda n: n.capacity.memory - n.flavor_memory_used)
 
 
 PLACEMENT_REGISTRY = {

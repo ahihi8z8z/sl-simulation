@@ -15,8 +15,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from serverless_sim.cluster.resource_profile import ResourceProfile
-
 if TYPE_CHECKING:
     from serverless_sim.cluster.node import Node
     from serverless_sim.core.simulation.sim_context import SimContext
@@ -62,15 +60,11 @@ class BaseLoadBalancer:
                 total = self.ctx.autoscaling_manager._count_total_instances(invocation.service_id)
                 if total >= max_inst:
                     return False
-        # Check resource for new container
-        mem_required = self._get_mem_required(invocation)
-        resource_req = ResourceProfile(cpu=0.0, memory=mem_required)
-        return node.available.can_fit(resource_req)
-
-    def _get_mem_required(self, invocation: Invocation) -> float:
-        """Get peak memory requirement for the invocation's service."""
+        # Check flavor capacity for new container
         service = self.ctx.workload_manager.services.get(invocation.service_id)
-        return service.peak_memory if service else 0.0
+        if service is None:
+            return False
+        return node.can_fit_flavor(service.peak_cpu, service.peak_memory)
 
     def _assign(self, invocation: Invocation, node: Node) -> None:
         """Assign invocation to node and start processing directly."""
@@ -190,11 +184,12 @@ class LeastLoadedBalancer(BaseLoadBalancer):
             self._drop(invocation, "no_capacity")
             return False
 
-        best = max(candidates, key=lambda n: n.available.memory)
+        best = max(candidates, key=lambda n: n.capacity.memory - n.flavor_memory_used)
         self._assign(invocation, best)
         self.logger.debug(
-            "t=%.3f | DISPATCH | %s → %s (least_loaded, avail_mem=%.0f)",
-            self.ctx.env.now, invocation.request_id, best.node_id, best.available.memory,
+            "t=%.3f | DISPATCH | %s → %s (least_loaded, flavor_mem_free=%.0f)",
+            self.ctx.env.now, invocation.request_id, best.node_id,
+            best.capacity.memory - best.flavor_memory_used,
         )
         return True
 
