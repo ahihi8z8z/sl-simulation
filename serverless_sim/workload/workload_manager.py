@@ -70,6 +70,14 @@ class WorkloadManager:
             alpha = workload_cfg.get("gamma_alpha", 1.0)
             beta = workload_cfg.get("gamma_beta", 1.0)
             generator = GammaArrivalGenerator(alpha=alpha, beta=beta)
+        elif gen_type == "gamma_window":
+            from serverless_sim.workload.generators import GammaWindowGenerator
+            trace_path = workload_cfg["trace_path"]
+            scale_alpha = workload_cfg.get("scale_alpha", 1.0)
+            scale_beta = workload_cfg.get("scale_beta", 1.0)
+            generator = GammaWindowGenerator(csv_path=trace_path,
+                                              scale_alpha=scale_alpha,
+                                              scale_beta=scale_beta)
         else:
             generator = PoissonFixedSizeGenerator()
 
