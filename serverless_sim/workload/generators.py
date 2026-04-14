@@ -15,8 +15,75 @@ class BaseGenerator:
     def attach(self, ctx: SimContext) -> None:
         raise NotImplementedError
 
-    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None,
+                          start_delay: float = 0) -> None:
         raise NotImplementedError
+
+
+class GammaArrivalGenerator(BaseGenerator):
+    """Gamma-distributed inter-arrival times.
+
+    Inter-arrival ~ Gamma(alpha, 1/beta) where:
+      alpha (shape): <1 = bursty, =1 = Poisson, >1 = regular
+      beta (rate): controls speed. Mean inter-arrival = alpha/beta.
+      Mean arrival rate = beta/alpha.
+    """
+
+    def __init__(self, alpha: float = 1.0, beta: float = 1.0):
+        self.ctx: SimContext | None = None
+        self._request_counter = 0
+        self._alpha = alpha
+        self._beta = beta
+
+    def attach(self, ctx: SimContext) -> None:
+        self.ctx = ctx
+
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None,
+                          start_delay: float = 0) -> None:
+        self.ctx.env.process(self._arrival_loop(service, stop_time, start_delay))
+
+    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None,
+                      start_delay: float = 0):
+        ctx = self.ctx
+        rng = ctx.rng
+        env = ctx.env
+
+        if start_delay > 0:
+            yield env.timeout(start_delay)
+
+        # numpy gamma: shape=alpha, scale=1/beta
+        scale = 1.0 / self._beta
+
+        while True:
+            if stop_time is not None and env.now >= stop_time:
+                return
+
+            interval = rng.gamma(self._alpha, scale)
+            yield env.timeout(interval)
+
+            if stop_time is not None and env.now >= stop_time:
+                return
+
+            self._request_counter += 1
+            request_id = f"req-{self._request_counter}"
+
+            inv = Invocation(
+                request_id=request_id,
+                service_id=service.service_id,
+                arrival_time=env.now,
+                job_size=service.job_size,
+                status="arrived",
+            )
+
+            ctx.request_table[request_id] = inv
+
+            ctx.logger.debug(
+                "t=%.3f | ARRIVE | %s service=%s",
+                env.now, request_id, service.service_id,
+            )
+
+            if ctx.dispatcher is not None:
+                ctx.dispatcher.dispatch(inv)
 
 
 class PoissonFixedSizeGenerator(BaseGenerator):
@@ -34,21 +101,19 @@ class PoissonFixedSizeGenerator(BaseGenerator):
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
 
-    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
-        """Kick off the SimPy arrival process for *service*.
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None,
+                          start_delay: float = 0) -> None:
+        self.ctx.env.process(self._arrival_loop(service, stop_time, start_delay))
 
-        Parameters
-        ----------
-        stop_time : float | None
-            If set, stop generating requests after this simulation time.
-        """
-        self.ctx.env.process(self._arrival_loop(service, stop_time))
-
-    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None):
+    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None,
+                      start_delay: float = 0):
         """SimPy process: generate requests with exponential inter-arrival."""
         ctx = self.ctx
         rng = ctx.rng
         env = ctx.env
+
+        if start_delay > 0:
+            yield env.timeout(start_delay)
 
         mean_interval = 1.0 / service.arrival_rate
 

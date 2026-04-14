@@ -45,6 +45,12 @@ def load_config(path: str) -> dict:
     return config
 
 
+def load_config_from_dict(config: dict) -> dict:
+    """Validate and return a config dictionary (no file I/O)."""
+    _validate(config, "<dict>")
+    return config
+
+
 def _validate(config: dict, path: str) -> None:
     """Validate that required keys exist in the config."""
     missing_top = REQUIRED_TOP_KEYS - set(config.keys())

@@ -31,9 +31,12 @@ class WorkloadManager:
         stop_time : float | None
             If set, generators stop producing requests after this time.
         """
+        start_delay = self.ctx.config.get("workload", {}).get("start_delay", 0)
         for service in self.services.values():
-            self.generator.start_for_service(service, stop_time=stop_time)
-            self.ctx.logger.info("Started generator for service: %s", service.service_id)
+            self.generator.start_for_service(service, stop_time=stop_time,
+                                              start_delay=start_delay)
+            self.ctx.logger.info("Started generator for service: %s (delay=%.1fs)",
+                                 service.service_id, start_delay)
 
     @classmethod
     def from_config(cls, ctx: SimContext) -> "WorkloadManager":
@@ -65,6 +68,11 @@ class WorkloadManager:
                                                 start_minute=start_minute,
                                                 end_minute=end_minute,
                                                 column_map=column_map)
+        elif gen_type == "gamma":
+            from serverless_sim.workload.generators import GammaArrivalGenerator
+            alpha = workload_cfg.get("gamma_alpha", 1.0)
+            beta = workload_cfg.get("gamma_beta", 1.0)
+            generator = GammaArrivalGenerator(alpha=alpha, beta=beta)
         else:
             generator = PoissonFixedSizeGenerator()
 
