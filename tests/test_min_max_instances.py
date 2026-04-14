@@ -10,6 +10,7 @@ from serverless_sim.cluster.cluster_manager import ClusterManager
 from serverless_sim.cluster.resource_profile import ResourceProfile
 from serverless_sim.workload.workload_manager import WorkloadManager
 from serverless_sim.workload.invocation import Invocation
+from serverless_sim.workload.service_time import FixedServiceTime
 from serverless_sim.scheduling.load_balancer import ShardingContainerPoolBalancer
 from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
 from serverless_sim.autoscaling.autoscaler import OpenWhiskPoolAutoscaler
@@ -53,7 +54,6 @@ def _make_config(
             {
                 "service_id": "svc-a",
                 "arrival_rate": arrival_rate,
-                "job_size": 0.1,
                 "max_concurrency": max_concurrency,
                 "min_instances": min_instances,
                 "max_instances": max_instances,
@@ -75,6 +75,7 @@ def _make_ctx(config, seed=42):
     logger.handlers.clear()
     logger.setLevel(logging.WARNING)
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir="/tmp/test_run")
+    ctx.service_time_provider = FixedServiceTime(duration=0.1)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)
@@ -140,7 +141,7 @@ class TestMinInstances:
 
         # Simulate a request consuming a warm instance
         inst = warm_before[0]
-        inv = Invocation(request_id="r1", service_id="svc-a", arrival_time=ctx.env.now, job_size=0.1)
+        inv = Invocation(request_id="r1", service_id="svc-a", arrival_time=ctx.env.now)
         ctx.lifecycle_manager.start_execution(inst, inv)
 
         # 1 warm + 1 running = 2 alive >= min_instances=2 → no refill
@@ -218,8 +219,8 @@ class TestMaxInstances:
                 request_id=f"use-{inst.instance_id}",
                 service_id="svc-a",
                 arrival_time=ctx.env.now,
-                job_size=100.0,  # long job: instance stays running
             )
+            inv.service_time = 100.0  # long job: instance stays running
             ctx.lifecycle_manager.start_execution(inst, inv)
 
         # Now all instances are running (fully occupied, max_concurrency=1), send another request
@@ -227,7 +228,6 @@ class TestMaxInstances:
             request_id="r-drop",
             service_id="svc-a",
             arrival_time=ctx.env.now,
-            job_size=0.1,
         )
         inv_drop.status = "arrived"
         ctx.request_table.register(inv_drop)
@@ -286,8 +286,8 @@ class TestMaxInstances:
                 request_id=f"use-{inst.instance_id}",
                 service_id="svc-a",
                 arrival_time=ctx.env.now,
-                job_size=100.0,  # long job: instance stays running
             )
+            inv.service_time = 100.0  # long job: instance stays running
             ctx.lifecycle_manager.start_execution(inst, inv)
 
         # Send a new request - all 3 running (fully occupied), would need cold start
@@ -296,7 +296,6 @@ class TestMaxInstances:
             request_id="r-over-max",
             service_id="svc-a",
             arrival_time=ctx.env.now,
-            job_size=0.1,
         )
         inv_drop.status = "arrived"
         ctx.request_table.register(inv_drop)
@@ -333,8 +332,8 @@ class TestMaxInstances:
                 request_id=f"use-{inst.instance_id}",
                 service_id="svc-a",
                 arrival_time=ctx.env.now,
-                job_size=0.1,
             )
+            inv.service_time = 0.1
             ctx.lifecycle_manager.start_execution(inst, inv)
 
         # Send a request - should not be dropped since total < max_instances
@@ -342,8 +341,8 @@ class TestMaxInstances:
             request_id="r-ok",
             service_id="svc-a",
             arrival_time=ctx.env.now,
-            job_size=0.1,
         )
+        inv_ok.service_time = 0.1
         inv_ok.status = "arrived"
         ctx.request_table.register(inv_ok)
         node.queue.put(inv_ok)
@@ -376,8 +375,8 @@ class TestMaxInstances:
             request_id="use-1",
             service_id="svc-a",
             arrival_time=ctx.env.now,
-            job_size=100.0,  # long job: instance stays running (max_concurrency=1, fully occupied)
         )
+        inv.service_time = 100.0  # long job: instance stays running (max_concurrency=1, fully occupied)
         ctx.lifecycle_manager.start_execution(inst, inv)
 
         # Send another request
@@ -385,7 +384,6 @@ class TestMaxInstances:
             request_id="r-drop-reason",
             service_id="svc-a",
             arrival_time=ctx.env.now,
-            job_size=0.1,
         )
         inv_drop.status = "arrived"
         ctx.request_table.register(inv_drop)
@@ -490,7 +488,6 @@ class TestValidation:
         cfg = {
             "service_id": "svc-test",
             "arrival_rate": 1.0,
-            "job_size": 0.1,
             "max_concurrency": 1,
             "lifecycle": _make_lifecycle(memory=128, cpu=0.5),
         }

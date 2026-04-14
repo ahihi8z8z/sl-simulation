@@ -4,19 +4,22 @@ Two generators are available:
 
 **TraceReplayGenerator** — per-request timestamps::
 
-    timestamp,function_id,duration,memory
-    0.001,func-a,0.150,256
-    0.003,func-b,2.000,512
+    timestamp,function_id
+    0.001,func-a
+    0.003,func-b
 
 **AggregateTraceGenerator** — request counts per minute::
 
-    minute,function_id,count,duration
-    0,func-a,5,0.15
-    1,func-a,10,0.15
-    1,func-b,3,2.0
+    minute,function_id,count
+    0,func-a,5
+    1,func-a,10
+    1,func-b,3
 
 The aggregate generator distributes ``count`` requests evenly within
 each minute (interval = 60 / count).
+
+Service time (execution duration) is NOT set by these generators —
+it is handled by the service_time provider configured separately.
 """
 
 from __future__ import annotations
@@ -28,7 +31,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from serverless_sim.workload.generators import BaseGenerator
-from serverless_sim.workload.invocation import Invocation
 
 if TYPE_CHECKING:
     from serverless_sim.core.simulation.sim_context import SimContext
@@ -41,14 +43,11 @@ MAX_TRACE_SIZE_MB = 500
 DEFAULT_TRACE_COLUMNS = {
     "timestamp": "timestamp",
     "function_id": "function_id",
-    "duration": "duration",
-    "memory": "memory",
 }
 DEFAULT_AGGREGATE_COLUMNS = {
     "minute": "minute",
     "function_id": "function_id",
     "count": "count",
-    "duration": "duration",
 }
 
 
@@ -57,8 +56,6 @@ class TraceRecord:
     """One row from the trace CSV."""
     timestamp: float
     function_id: str
-    duration: float | None = None
-    memory: float | None = None
 
 
 class TraceReplayGenerator(BaseGenerator):
@@ -100,13 +97,9 @@ class TraceReplayGenerator(BaseGenerator):
         with open(path, "r") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                dur_col = c["duration"]
-                mem_col = c["memory"]
                 record = TraceRecord(
                     timestamp=float(row[c["timestamp"]]),
                     function_id=row[c["function_id"]],
-                    duration=float(row[dur_col]) if dur_col in row and row[dur_col] else None,
-                    memory=float(row[mem_col]) if mem_col in row and row[mem_col] else None,
                 )
                 self._records.append(record)
 
@@ -183,28 +176,14 @@ class TraceReplayGenerator(BaseGenerator):
                 )
                 return
 
-            self._request_counter += 1
-            request_id = f"req-{self._request_counter}"
-
-            inv = Invocation(
-                request_id=request_id,
-                service_id=service.service_id,
-                arrival_time=env.now,
-                job_size=record.duration if record.duration is not None else service.job_size,
-                service_time=record.duration,
-                status="arrived",
-            )
-
-            ctx.request_table[request_id] = inv
+            inv = self._make_invocation(ctx, service)
 
             ctx.logger.debug(
-                "t=%.3f | TRACE_ARRIVE | %s service=%s duration=%s",
-                env.now, request_id, service.service_id,
-                f"{record.duration:.3f}" if record.duration else "N/A",
+                "t=%.3f | TRACE_ARRIVE | %s service=%s",
+                env.now, inv.request_id, service.service_id,
             )
 
-            if ctx.dispatcher is not None:
-                ctx.dispatcher.dispatch(inv)
+            self._dispatch(ctx, inv)
 
     @property
     def record_count(self) -> int:
@@ -227,7 +206,6 @@ class AggregateRecord:
     minute: int
     function_id: str
     count: float
-    duration: float | None = None
 
 
 class AggregateTraceGenerator(BaseGenerator):
@@ -235,14 +213,13 @@ class AggregateTraceGenerator(BaseGenerator):
 
     CSV format::
 
-        minute,function_id,count,duration
-        0,func-a,5,0.15
-        1,func-a,10,0.15
-        1,func-b,3,2.0
+        minute,function_id,count
+        0,func-a,5
+        1,func-a,10
+        1,func-b,3
 
     For each row, ``count`` requests are distributed evenly within that
-    minute (interval = 60 / count).  If ``duration`` is present, it is
-    set as ``invocation.service_time`` for ``PrecomputedServingModel``.
+    minute (interval = 60 / count).
 
     Parameters
     ----------
@@ -280,7 +257,6 @@ class AggregateTraceGenerator(BaseGenerator):
         with open(path, "r") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                dur_col = c["duration"]
                 count_raw = row[c["count"]]
                 if not count_raw or count_raw == "":
                     continue
@@ -291,10 +267,8 @@ class AggregateTraceGenerator(BaseGenerator):
                     minute=int(float(row[c["minute"]])),
                     function_id=row[c["function_id"]],
                     count=count_val,
-                    duration=float(row[dur_col]) if dur_col in row and row[dur_col] else None,
                 )
-                if record.count > 0:
-                    self._records.append(record)
+                self._records.append(record)
 
         self._records.sort(key=lambda r: r.minute)
         self._apply_time_range()
@@ -383,28 +357,15 @@ class AggregateTraceGenerator(BaseGenerator):
                     )
                     return
 
-                self._request_counter += 1
-                request_id = f"req-{self._request_counter}"
-
-                inv = Invocation(
-                    request_id=request_id,
-                    service_id=service.service_id,
-                    arrival_time=env.now,
-                    job_size=record.duration if record.duration is not None else service.job_size,
-                    service_time=record.duration,
-                    status="arrived",
-                )
-
-                ctx.request_table[request_id] = inv
+                inv = self._make_invocation(ctx, service)
 
                 ctx.logger.debug(
                     "t=%.3f | AGG_ARRIVE | %s service=%s (minute=%d, %d/%d)",
-                    env.now, request_id, service.service_id,
+                    env.now, inv.request_id, service.service_id,
                     record.minute, i + 1, emit_count,
                 )
 
-                if ctx.dispatcher is not None:
-                    ctx.dispatcher.dispatch(inv)
+                self._dispatch(ctx, inv)
 
     @property
     def record_count(self) -> int:

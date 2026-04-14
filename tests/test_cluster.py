@@ -1,4 +1,4 @@
-"""Unit tests for Step 2: Resource model, Node, ClusterManager."""
+"""Unit tests for resource model, Node, ClusterManager."""
 
 import simpy
 import logging
@@ -6,7 +6,6 @@ import logging
 from serverless_sim.cluster.resource_profile import ResourceProfile
 from serverless_sim.cluster.node import Node
 from serverless_sim.cluster.compute_class import ComputeClass
-from serverless_sim.cluster.serving_model import FixedRateModel
 from serverless_sim.cluster.cluster_manager import ClusterManager
 
 
@@ -35,7 +34,6 @@ SAMPLE_CONFIG = {
         {
             "service_id": "svc-a",
             "arrival_rate": 1.0,
-            "job_size": 0.5,
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
         }
@@ -85,20 +83,6 @@ class TestResourceProfile:
 
 
 # ------------------------------------------------------------------ #
-# FixedRateModel tests
-# ------------------------------------------------------------------ #
-
-class TestFixedRateModel:
-    def test_service_time(self):
-        model = FixedRateModel(processing_factor=2.0)
-        assert model.estimate_service_time(job_size=0.5, node=None) == 1.0
-
-    def test_service_time_default(self):
-        model = FixedRateModel()
-        assert model.estimate_service_time(job_size=3.0, node=None) == 3.0
-
-
-# ------------------------------------------------------------------ #
 # Node tests
 # ------------------------------------------------------------------ #
 
@@ -109,7 +93,6 @@ class TestNode:
             node_id="test-node",
             capacity=ResourceProfile(cpu=4.0, memory=4096),
             compute_class=ComputeClass(class_id="default"),
-            serving_model=FixedRateModel(),
             logger=logging.getLogger("test"),
         )
 

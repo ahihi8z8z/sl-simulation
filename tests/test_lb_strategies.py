@@ -9,6 +9,7 @@ from serverless_sim.cluster.cluster_manager import ClusterManager
 from serverless_sim.cluster.resource_profile import ResourceProfile
 from serverless_sim.workload.workload_manager import WorkloadManager
 from serverless_sim.workload.invocation import Invocation
+from serverless_sim.workload.service_time import FixedServiceTime
 from serverless_sim.scheduling.load_balancer import (
     HashRingBalancer,
     RoundRobinBalancer,
@@ -51,7 +52,6 @@ def _make_config(strategy="hash_ring", num_nodes=2):
         "services": [{
             "service_id": "svc-a",
             "arrival_rate": 5.0,
-            "job_size": 0.1,
             "max_concurrency": 4,
             "lifecycle": LIFECYCLE_CFG,
         }],
@@ -67,6 +67,7 @@ def _make_ctx(config):
     logger.handlers.clear()
     logger.setLevel(logging.WARNING)
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir="/tmp/test_lb")
+    ctx.service_time_provider = FixedServiceTime(duration=0.1)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     return ctx
@@ -78,7 +79,7 @@ def _dispatch_n(lb, ctx, n, service_id="svc-a"):
     for i in range(n):
         inv = Invocation(
             request_id=f"r-{i}", service_id=service_id,
-            arrival_time=0.0, job_size=0.1, status="arrived",
+            arrival_time=0.0, status="arrived",
         )
         ctx.request_table[inv.request_id] = inv
         lb.dispatch(inv)
@@ -157,7 +158,7 @@ class TestRoundRobinBalancer:
             node.flavor_memory_used = node.capacity.memory
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
-                         arrival_time=0.0, job_size=0.1, status="arrived")
+                         arrival_time=0.0, status="arrived")
         ctx.request_table["r-drop"] = inv
         assert lb.dispatch(inv) is False
         assert inv.dropped is True
@@ -202,7 +203,7 @@ class TestLeastLoadedBalancer:
             node.flavor_memory_used = node.capacity.memory
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
-                         arrival_time=0.0, job_size=0.1, status="arrived")
+                         arrival_time=0.0, status="arrived")
         ctx.request_table["r-drop"] = inv
         assert lb.dispatch(inv) is False
 
@@ -232,7 +233,7 @@ class TestPowerOfTwoChoicesBalancer:
             node.flavor_memory_used = node.capacity.memory
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
-                         arrival_time=0.0, job_size=0.1, status="arrived")
+                         arrival_time=0.0, status="arrived")
         ctx.request_table["r-drop"] = inv
         assert lb.dispatch(inv) is False
 

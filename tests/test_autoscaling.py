@@ -21,6 +21,8 @@ def _make_ctx(config, seed=42):
     logger.handlers.clear()
     logger.setLevel(logging.DEBUG)
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir="/tmp/test_run")
+    from serverless_sim.workload.service_time import FixedServiceTime
+    ctx.service_time_provider = FixedServiceTime(duration=0.1)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)

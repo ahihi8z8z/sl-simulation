@@ -17,6 +17,7 @@ from serverless_sim.lifecycle.state_machine import OpenWhiskExtendedStateMachine
 from serverless_sim.core.simulation.sim_context import SimContext
 from serverless_sim.cluster.cluster_manager import ClusterManager
 from serverless_sim.workload.workload_manager import WorkloadManager
+from serverless_sim.workload.service_time import FixedServiceTime
 from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
 from serverless_sim.scheduling.load_balancer import ShardingContainerPoolBalancer
 
@@ -282,7 +283,6 @@ class TestSimulationWithCsvModel:
             "services": [{
                 "service_id": "svc-a",
                 "arrival_rate": 2.0,
-                "job_size": 0.1,
                 "max_concurrency": 4,
                 "lifecycle": lifecycle_with_csv,
             }],
@@ -298,6 +298,7 @@ class TestSimulationWithCsvModel:
         logger.setLevel(logging.WARNING)
 
         ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir=tmpdir)
+        ctx.service_time_provider = FixedServiceTime(duration=0.1)
         ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
         ctx.workload_manager = WorkloadManager.from_config(ctx)
         ctx.lifecycle_manager = LifecycleManager(ctx)
@@ -331,7 +332,6 @@ class TestSimulationWithCsvModel:
             "services": [{
                 "service_id": "svc-a",
                 "arrival_rate": 5.0,
-                "job_size": 0.1,
                 "max_concurrency": 1,  # force cold start for each request
                 "lifecycle": lifecycle_with_csv,
             }],
@@ -347,6 +347,7 @@ class TestSimulationWithCsvModel:
         logger.setLevel(logging.WARNING)
 
         ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir=tmpdir)
+        ctx.service_time_provider = FixedServiceTime(duration=0.1)
         ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
         ctx.workload_manager = WorkloadManager.from_config(ctx)
         ctx.lifecycle_manager = LifecycleManager(ctx)

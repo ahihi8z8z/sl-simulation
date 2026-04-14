@@ -46,7 +46,7 @@ SLOW_SERVICE_CONFIG = {
         {
             "service_id": "svc-slow",
             "arrival_rate": 5.0,
-            "job_size": 2.0,       # 2s service time — many will be in-flight at t=3
+            # 2s service time configured via service_time provider
             "max_concurrency": 1,
             "lifecycle": LIFECYCLE_256_1,
         }
@@ -66,6 +66,8 @@ def _make_ctx(config, seed=42):
     logger.setLevel(logging.WARNING)
     run_dir = tempfile.mkdtemp(prefix="test_drain_")
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir=run_dir)
+    from serverless_sim.workload.service_time import FixedServiceTime
+    ctx.service_time_provider = FixedServiceTime(duration=2.0)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)

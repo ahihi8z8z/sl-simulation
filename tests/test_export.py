@@ -43,7 +43,6 @@ CONFIG = {
         {
             "service_id": "svc-a",
             "arrival_rate": 5.0,
-            "job_size": 0.1,
             "max_concurrency": 4,
             "lifecycle": LIFECYCLE_256_1,
         }
@@ -65,6 +64,8 @@ def _run_sim(export_mode: int):
     logger.setLevel(logging.WARNING)
 
     ctx = SimContext(env=env, config=CONFIG, rng=rng, logger=logger, run_dir=run_dir)
+    from serverless_sim.workload.service_time import FixedServiceTime
+    ctx.service_time_provider = FixedServiceTime(duration=0.1)
     ctx.cluster_manager = ClusterManager(env=env, config=CONFIG, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)

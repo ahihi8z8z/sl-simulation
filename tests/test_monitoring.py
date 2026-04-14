@@ -12,6 +12,7 @@ from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
 from serverless_sim.monitoring.metric_store import MetricStore
 from serverless_sim.monitoring.monitor_manager import MonitorManager
 from serverless_sim.monitoring.monitor_api import MonitorAPI
+from serverless_sim.workload.service_time import FixedServiceTime
 
 
 def _make_ctx(seed=42):
@@ -21,7 +22,6 @@ def _make_ctx(seed=42):
             {
                 "service_id": "svc-a",
                 "arrival_rate": 5.0,
-                "job_size": 0.1,
                 "max_concurrency": 4,
                 "lifecycle": {
                     "cold_start_chain": ["null", "prewarm", "warm"],
@@ -54,6 +54,7 @@ def _make_ctx(seed=42):
     logger.handlers.clear()
     logger.setLevel(logging.WARNING)
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir="/tmp/test_run")
+    ctx.service_time_provider = FixedServiceTime(duration=0.1)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)

@@ -12,6 +12,7 @@ from serverless_sim.scheduling.load_balancer import ShardingContainerPoolBalance
 from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
 from serverless_sim.lifecycle.state_machine import OpenWhiskExtendedStateMachine
 from serverless_sim.lifecycle.container_instance import ContainerInstance
+from serverless_sim.workload.service_time import FixedServiceTime
 
 
 LIFECYCLE_256_1 = {
@@ -39,7 +40,6 @@ SAMPLE_CONFIG = {
         {
             "service_id": "svc-a",
             "arrival_rate": 5.0,
-            "job_size": 0.1,
             "max_concurrency": 4,
             "lifecycle": LIFECYCLE_256_1,
         }
@@ -60,6 +60,7 @@ def _make_ctx(config=None, seed=42) -> SimContext:
     logger.handlers.clear()
     logger.setLevel(logging.DEBUG)
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir="/tmp/test_run")
+    ctx.service_time_provider = FixedServiceTime(duration=0.1)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)
@@ -152,7 +153,6 @@ class TestLifecycleEndToEnd:
                 {
                     "service_id": "svc-concurrent",
                     "arrival_rate": 20.0,
-                    "job_size": 1.0,
                     "max_concurrency": 4,
                     "lifecycle": {
                         "cold_start_chain": ["null", "prewarm", "warm"],

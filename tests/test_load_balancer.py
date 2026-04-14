@@ -8,6 +8,7 @@ from serverless_sim.core.simulation.sim_context import SimContext
 from serverless_sim.cluster.cluster_manager import ClusterManager
 from serverless_sim.workload.workload_manager import WorkloadManager
 from serverless_sim.workload.invocation import Invocation
+from serverless_sim.workload.service_time import FixedServiceTime
 from serverless_sim.scheduling.load_balancer import ShardingContainerPoolBalancer
 
 
@@ -36,7 +37,6 @@ SAMPLE_CONFIG = {
         {
             "service_id": "svc-a",
             "arrival_rate": 10.0,
-            "job_size": 0.5,
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
         }
@@ -58,6 +58,7 @@ def _make_ctx(config=None) -> SimContext:
     logger.handlers.clear()
     logger.setLevel(logging.DEBUG)
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir="/tmp/test_run")
+    ctx.service_time_provider = FixedServiceTime(duration=0.1)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     return ctx
@@ -68,7 +69,7 @@ class TestShardingBalancer:
         ctx = _make_ctx()
         lb = ShardingContainerPoolBalancer(ctx)
         inv = Invocation(request_id="r1", service_id="svc-a", arrival_time=0.0,
-                         job_size=0.5, status="arrived")
+                         status="arrived")
         ctx.request_table["r1"] = inv
 
         ok = lb.dispatch(inv)
@@ -85,7 +86,7 @@ class TestShardingBalancer:
         node_ids = set()
         for i in range(10):
             inv = Invocation(request_id=f"r{i}", service_id="svc-a",
-                             arrival_time=0.0, job_size=0.5, status="arrived")
+                             arrival_time=0.0, status="arrived")
             ctx.request_table[inv.request_id] = inv
             lb.dispatch(inv)
             node_ids.add(inv.assigned_node_id)
@@ -100,7 +101,7 @@ class TestShardingBalancer:
 
         # Figure out primary node for svc-a
         inv0 = Invocation(request_id="probe", service_id="svc-a",
-                          arrival_time=0.0, job_size=0.5, status="arrived")
+                          arrival_time=0.0, status="arrived")
         ctx.request_table["probe"] = inv0
         lb.dispatch(inv0)
         primary_node_id = inv0.assigned_node_id
@@ -111,7 +112,7 @@ class TestShardingBalancer:
 
         # Next dispatch should fallback
         inv1 = Invocation(request_id="r-fallback", service_id="svc-a",
-                          arrival_time=0.0, job_size=0.5, status="arrived")
+                          arrival_time=0.0, status="arrived")
         ctx.request_table["r-fallback"] = inv1
         ok = lb.dispatch(inv1)
         assert ok is True
@@ -126,7 +127,7 @@ class TestShardingBalancer:
             node.flavor_memory_used = node.capacity.memory
 
         inv = Invocation(request_id="r-drop", service_id="svc-a",
-                         arrival_time=0.0, job_size=0.5, status="arrived")
+                         arrival_time=0.0, status="arrived")
         ctx.request_table["r-drop"] = inv
         ok = lb.dispatch(inv)
         assert ok is False

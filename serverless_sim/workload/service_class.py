@@ -15,7 +15,6 @@ class ServiceClass:
     display_name: str = ""
     arrival_mode: str = "poisson"
     arrival_rate: float = 1.0
-    job_size: float = 1.0
     max_concurrency: int = 1
     min_instances: int = 0
     max_instances: int = 0  # 0 = unlimited
@@ -66,9 +65,8 @@ class ServiceClass:
             service_id=cfg["service_id"],
             display_name=cfg.get("display_name", cfg["service_id"]),
             arrival_mode=cfg.get("arrival_mode", "poisson"),
-            arrival_rate=cfg["arrival_rate"],
-            job_size=cfg["job_size"],
-            max_concurrency=cfg["max_concurrency"],
+            arrival_rate=cfg.get("arrival_rate", 0.0),
+            max_concurrency=cfg.get("max_concurrency", 1),
             min_instances=cfg.get("min_instances", 0),
             max_instances=cfg.get("max_instances", 0),
             request_cpu=cfg.get("request_cpu", 0.0),

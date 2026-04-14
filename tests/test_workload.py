@@ -9,6 +9,7 @@ from serverless_sim.workload.service_class import ServiceClass
 from serverless_sim.workload.invocation import Invocation
 from serverless_sim.workload.generators import PoissonFixedSizeGenerator
 from serverless_sim.workload.workload_manager import WorkloadManager
+from serverless_sim.workload.service_time import FixedServiceTime
 
 
 LIFECYCLE_256_1 = {
@@ -36,7 +37,6 @@ SAMPLE_CONFIG = {
         {
             "service_id": "svc-a",
             "arrival_rate": 10.0,
-            "job_size": 0.5,
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
         }
@@ -53,13 +53,15 @@ def _make_ctx(duration: float = 10.0, seed: int = 42) -> SimContext:
     logger = logging.getLogger("test_workload")
     logger.handlers.clear()
     logger.setLevel(logging.DEBUG)
-    return SimContext(
+    ctx = SimContext(
         env=env,
         config=SAMPLE_CONFIG,
         rng=rng,
         logger=logger,
         run_dir="/tmp/test_run",
     )
+    ctx.service_time_provider = FixedServiceTime(duration=0.1)
+    return ctx
 
 
 # ------------------------------------------------------------------ #
@@ -72,7 +74,6 @@ class TestServiceClass:
         svc = ServiceClass.from_config(cfg)
         assert svc.service_id == "svc-a"
         assert svc.arrival_rate == 10.0
-        assert svc.job_size == 0.5
         assert svc.peak_memory == 256
         assert svc.peak_cpu == 1.0
         assert svc.max_concurrency == 2
@@ -81,7 +82,6 @@ class TestServiceClass:
         cfg = {
             "service_id": "svc-b",
             "arrival_rate": 1.0,
-            "job_size": 0.1,
             "max_concurrency": 1,
             "lifecycle": {
                 "cold_start_chain": ["null", "prewarm", "warm"],
@@ -154,7 +154,6 @@ class TestPoissonGenerator:
         for inv in ctx.request_table.values():
             assert 0.0 < inv.arrival_time <= 5.0
             assert inv.service_id == "svc-a"
-            assert inv.job_size == 0.5
             assert inv.status == "arrived"
 
     def test_deterministic_with_seed(self):
@@ -196,9 +195,9 @@ class TestWorkloadManager:
     def test_register_multiple_services(self):
         ctx = _make_ctx()
         wm = WorkloadManager(ctx)
-        svc_a = ServiceClass(service_id="svc-a", arrival_rate=5.0, job_size=0.1,
+        svc_a = ServiceClass(service_id="svc-a", arrival_rate=5.0,
                              max_concurrency=1)
-        svc_b = ServiceClass(service_id="svc-b", arrival_rate=2.0, job_size=0.2,
+        svc_b = ServiceClass(service_id="svc-b", arrival_rate=2.0,
                              max_concurrency=2)
         wm.register_service(svc_a)
         wm.register_service(svc_b)
@@ -268,24 +267,6 @@ class TestAggregateTraceGenerator:
         for i in range(1, len(times)):
             assert abs(times[i] - times[i - 1] - 6.0) < 0.001
 
-    def test_service_time_from_duration(self):
-        """duration column sets invocation.service_time."""
-        path = self._write_csv([
-            "0,svc-a,2,0.75",
-        ])
-        ctx = _make_ctx(duration=60.0)
-        svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
-
-        gen = AggregateTraceGenerator(path)
-        gen.attach(ctx)
-        gen.start_for_service(svc)
-
-        ctx.env.run(until=60.0)
-
-        for inv in ctx.request_table.values():
-            assert inv.service_time == 0.75
-            assert inv.job_size == 0.75
-
     def test_stop_time_respected(self):
         """Generator stops when stop_time is reached."""
         path = self._write_csv([
@@ -330,7 +311,7 @@ class TestAggregateTraceGenerator:
         ])
         ctx = _make_ctx(duration=60.0)
         svc_a = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
-        svc_b = ServiceClass(service_id="svc-b", arrival_rate=1.0, job_size=0.5,
+        svc_b = ServiceClass(service_id="svc-b", arrival_rate=1.0,
                              max_concurrency=1)
 
         gen = AggregateTraceGenerator(path)

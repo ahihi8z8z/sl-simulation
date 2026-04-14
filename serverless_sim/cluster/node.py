@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 import simpy
 
 from serverless_sim.cluster.resource_profile import ResourceProfile
-from serverless_sim.cluster.serving_model import BaseServingModel
 
 if TYPE_CHECKING:
     from serverless_sim.cluster.compute_class import ComputeClass
@@ -22,14 +21,12 @@ class Node:
         node_id: str,
         capacity: ResourceProfile,
         compute_class: ComputeClass,
-        serving_model: BaseServingModel,
         logger: logging.Logger | None = None,
     ):
         self.env = env
         self.node_id = node_id
         self.capacity = capacity
         self.compute_class = compute_class
-        self.serving_model = serving_model
         self.logger = logger or logging.getLogger(__name__)
 
         # System reserved resources (applied only when node has pods)
@@ -213,11 +210,8 @@ class Node:
         if cold_start:
             invocation.cold_start = True
 
-        # Compute service time
-        service_time = self.serving_model.estimate_service_time(
-            invocation.job_size, self, service_time=invocation.service_time,
-        )
-        yield self.env.timeout(service_time)
+        # Use pre-assigned service time
+        yield self.env.timeout(invocation.service_time)
 
         # Release resources
         lm.finish_execution(instance, invocation)
@@ -231,7 +225,7 @@ class Node:
             self.node_id,
             invocation.request_id,
             cold_start,
-            service_time,
+            invocation.service_time,
         )
 
     def __repr__(self) -> str:

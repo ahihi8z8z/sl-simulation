@@ -1,4 +1,4 @@
-"""Tests for TraceReplayGenerator and PrecomputedServingModel."""
+"""Tests for TraceReplayGenerator and service_time provider integration."""
 
 import os
 import tempfile
@@ -9,9 +9,9 @@ import numpy as np
 
 from serverless_sim.core.simulation.sim_context import SimContext
 from serverless_sim.cluster.cluster_manager import ClusterManager
-from serverless_sim.cluster.serving_model import PrecomputedServingModel, FixedRateModel
 from serverless_sim.workload.workload_manager import WorkloadManager
 from serverless_sim.workload.trace_generator import TraceReplayGenerator
+from serverless_sim.workload.service_time import FixedServiceTime
 from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
 from serverless_sim.scheduling.load_balancer import ShardingContainerPoolBalancer
 
@@ -43,26 +43,25 @@ def _write_trace(tmpdir, rows):
     """Write a trace CSV and return path."""
     path = os.path.join(tmpdir, "trace.csv")
     with open(path, "w") as f:
-        f.write("timestamp,function_id,duration\n")
+        f.write("timestamp,function_id\n")
         for row in rows:
             f.write(",".join(str(v) for v in row) + "\n")
     return path
 
 
-def _make_config(trace_path=None, serving_model="fixed_rate"):
+def _make_config(trace_path=None):
     config = {
         "simulation": {"duration": 10.0, "seed": 42},
         "services": [{
             "service_id": "svc-a",
             "arrival_rate": 1.0,
-            "job_size": 0.1,
             "max_concurrency": 4,
             "lifecycle": LIFECYCLE_CFG,
         }],
         "cluster": {
-            "serving_model": serving_model,
             "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}],
         },
+        "service_time": {"mode": "fixed", "duration": 0.1},
     }
     if trace_path:
         config["workload"] = {
@@ -80,6 +79,11 @@ def _make_ctx(config, tmpdir):
     logger.setLevel(logging.WARNING)
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir=tmpdir)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
+
+    # Service time provider
+    from serverless_sim.workload.service_time import create_service_time_provider
+    ctx.service_time_provider = create_service_time_provider(config)
+
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)
     ctx.dispatcher = ShardingContainerPoolBalancer(ctx)
@@ -95,9 +99,9 @@ class TestTraceReplayGenerator:
     def test_load_records(self):
         tmpdir = tempfile.mkdtemp()
         path = _write_trace(tmpdir, [
-            (0.1, "svc-a", 0.05),
-            (0.2, "svc-a", 0.08),
-            (0.3, "svc-b", 0.10),
+            (0.1, "svc-a"),
+            (0.2, "svc-a"),
+            (0.3, "svc-b"),
         ])
         gen = TraceReplayGenerator(path)
         assert gen.record_count == 3
@@ -106,9 +110,9 @@ class TestTraceReplayGenerator:
     def test_records_sorted_by_timestamp(self):
         tmpdir = tempfile.mkdtemp()
         path = _write_trace(tmpdir, [
-            (0.5, "svc-a", 0.05),
-            (0.1, "svc-a", 0.08),
-            (0.3, "svc-a", 0.10),
+            (0.5, "svc-a"),
+            (0.1, "svc-a"),
+            (0.3, "svc-a"),
         ])
         gen = TraceReplayGenerator(path)
         assert gen._records[0].timestamp == 0.1
@@ -118,11 +122,11 @@ class TestTraceReplayGenerator:
     def test_replay_creates_requests(self):
         tmpdir = tempfile.mkdtemp()
         path = _write_trace(tmpdir, [
-            (0.1, "svc-a", 0.05),
-            (0.5, "svc-a", 0.08),
-            (1.0, "svc-a", 0.10),
+            (0.1, "svc-a"),
+            (0.5, "svc-a"),
+            (1.0, "svc-a"),
         ])
-        config = _make_config(trace_path=path, serving_model="precomputed")
+        config = _make_config(trace_path=path)
         ctx = _make_ctx(config, tmpdir)
 
         ctx.cluster_manager.start_all()
@@ -135,12 +139,12 @@ class TestTraceReplayGenerator:
     def test_stop_time_respected(self):
         tmpdir = tempfile.mkdtemp()
         path = _write_trace(tmpdir, [
-            (0.1, "svc-a", 0.05),
-            (0.5, "svc-a", 0.08),
-            (2.0, "svc-a", 0.10),  # after stop_time
-            (3.0, "svc-a", 0.10),  # after stop_time
+            (0.1, "svc-a"),
+            (0.5, "svc-a"),
+            (2.0, "svc-a"),
+            (3.0, "svc-a"),
         ])
-        config = _make_config(trace_path=path, serving_model="precomputed")
+        config = _make_config(trace_path=path)
         config["simulation"]["duration"] = 1.0
         ctx = _make_ctx(config, tmpdir)
 
@@ -148,32 +152,29 @@ class TestTraceReplayGenerator:
         ctx.workload_manager.start(stop_time=1.0)
         ctx.env.run(until=5.0)
 
-        # Only first 2 requests should be generated (before stop_time=1.0)
         assert ctx.request_table.counters.total == 2
 
     def test_unmatched_function_ids_skipped(self):
         tmpdir = tempfile.mkdtemp()
         path = _write_trace(tmpdir, [
-            (0.1, "svc-a", 0.05),
-            (0.2, "svc-unknown", 0.08),  # not in config
-            (0.3, "svc-a", 0.10),
+            (0.1, "svc-a"),
+            (0.2, "svc-unknown"),
+            (0.3, "svc-a"),
         ])
-        config = _make_config(trace_path=path, serving_model="precomputed")
+        config = _make_config(trace_path=path)
         ctx = _make_ctx(config, tmpdir)
 
         ctx.cluster_manager.start_all()
         ctx.workload_manager.start()
         ctx.env.run(until=5.0)
 
-        # svc-unknown is skipped, only svc-a requests
         assert ctx.request_table.counters.total == 2
 
-    def test_service_time_set_from_duration(self):
+    def test_service_time_assigned_by_provider(self):
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [
-            (0.1, "svc-a", 0.123),
-        ])
-        config = _make_config(trace_path=path, serving_model="precomputed")
+        path = _write_trace(tmpdir, [(0.1, "svc-a")])
+        config = _make_config(trace_path=path)
+        config["service_time"] = {"mode": "fixed", "duration": 0.5}
         ctx = _make_ctx(config, tmpdir)
 
         ctx.cluster_manager.start_all()
@@ -184,31 +185,39 @@ class TestTraceReplayGenerator:
 
 
 # ------------------------------------------------------------------
-# PrecomputedServingModel tests
+# ServiceTimeProvider tests
 # ------------------------------------------------------------------
 
-class TestPrecomputedServingModel:
-    def test_uses_service_time(self):
-        model = PrecomputedServingModel()
-        t = model.estimate_service_time(0.1, node=None, service_time=0.5)
-        assert t == 0.5
+class TestServiceTimeProvider:
+    def test_fixed_service_time(self):
+        from serverless_sim.workload.invocation import Invocation
+        provider = FixedServiceTime(duration=0.42)
+        inv = Invocation(request_id="r1", service_id="svc-a")
+        rng = np.random.default_rng(42)
+        provider.assign(inv, rng)
+        assert inv.service_time == 0.42
 
-    def test_fallback_to_job_size(self):
-        model = PrecomputedServingModel()
-        t = model.estimate_service_time(0.1, node=None, service_time=None)
-        assert t == 0.1
+    def test_sample_csv_service_time(self):
+        from serverless_sim.workload.service_time import SampleCsvServiceTime
+        from serverless_sim.workload.invocation import Invocation
 
-    def test_fallback_when_no_kwarg(self):
-        model = PrecomputedServingModel()
-        t = model.estimate_service_time(0.3, node=None)
-        assert t == 0.3
+        tmpdir = tempfile.mkdtemp()
+        csv_path = os.path.join(tmpdir, "durations.csv")
+        with open(csv_path, "w") as f:
+            f.write("duration\n0.1\n0.2\n0.3\n")
+
+        provider = SampleCsvServiceTime(csv_path)
+        inv = Invocation(request_id="r1", service_id="svc-a")
+        rng = np.random.default_rng(42)
+        provider.assign(inv, rng)
+        assert inv.service_time in (0.1, 0.2, 0.3)
 
 
 # ------------------------------------------------------------------
-# Config-driven model selection tests
+# Config-driven selection tests
 # ------------------------------------------------------------------
 
-class TestConfigModelSelection:
+class TestConfigSelection:
     def test_poisson_default(self):
         tmpdir = tempfile.mkdtemp()
         config = _make_config()
@@ -218,39 +227,26 @@ class TestConfigModelSelection:
 
     def test_trace_generator_from_config(self):
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [(0.1, "svc-a", 0.05)])
+        path = _write_trace(tmpdir, [(0.1, "svc-a")])
         config = _make_config(trace_path=path)
         ctx = _make_ctx(config, tmpdir)
         assert isinstance(ctx.workload_manager.generator, TraceReplayGenerator)
 
-    def test_precomputed_serving_model_from_config(self):
-        tmpdir = tempfile.mkdtemp()
-        config = _make_config(serving_model="precomputed")
-        ctx = _make_ctx(config, tmpdir)
-        node = ctx.cluster_manager.get_node("node-0")
-        assert isinstance(node.serving_model, PrecomputedServingModel)
-
-    def test_fixed_rate_serving_model_default(self):
-        tmpdir = tempfile.mkdtemp()
-        config = _make_config(serving_model="fixed_rate")
-        ctx = _make_ctx(config, tmpdir)
-        node = ctx.cluster_manager.get_node("node-0")
-        assert isinstance(node.serving_model, FixedRateModel)
-
 
 # ------------------------------------------------------------------
-# Integration: trace replay + precomputed serving model
+# Integration
 # ------------------------------------------------------------------
 
 class TestTraceReplayIntegration:
-    def test_variable_execution_times(self):
-        """Requests with different durations should complete at different times."""
+    def test_fixed_service_time_execution(self):
+        """All requests should complete with fixed service time."""
         tmpdir = tempfile.mkdtemp()
         path = _write_trace(tmpdir, [
-            (0.0, "svc-a", 0.1),   # short
-            (0.0, "svc-a", 1.0),   # long
+            (0.0, "svc-a"),
+            (0.0, "svc-a"),
         ])
-        config = _make_config(trace_path=path, serving_model="precomputed")
+        config = _make_config(trace_path=path)
+        config["service_time"] = {"mode": "fixed", "duration": 0.5}
         ctx = _make_ctx(config, tmpdir)
 
         ctx.cluster_manager.start_all()
@@ -258,30 +254,3 @@ class TestTraceReplayIntegration:
         ctx.env.run(until=10.0)
 
         assert ctx.request_table.counters.completed == 2
-
-    def test_sample_trace_config(self):
-        """Test with actual sample configs if they exist."""
-        config_path = os.path.join(
-            os.path.dirname(__file__), "..",
-            "configs", "simulation", "sample_trace_replay.json",
-        )
-        trace_path = os.path.join(
-            os.path.dirname(__file__), "..",
-            "configs", "simulation", "sample_trace.csv",
-        )
-        if not os.path.exists(config_path) or not os.path.exists(trace_path):
-            return
-
-        import json
-        with open(config_path) as f:
-            config = json.load(f)
-
-        tmpdir = tempfile.mkdtemp()
-        ctx = _make_ctx(config, tmpdir)
-
-        ctx.cluster_manager.start_all()
-        ctx.workload_manager.start()
-        ctx.env.run(until=config["simulation"]["duration"])
-
-        assert ctx.request_table.counters.total > 0
-        assert ctx.request_table.counters.completed > 0
