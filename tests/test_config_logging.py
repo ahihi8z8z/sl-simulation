@@ -16,7 +16,6 @@ VALID_CONFIG = {
     "services": [
         {
             "service_id": "svc-a",
-            "arrival_rate": 1.0,
             "job_size": 0.1,
             "max_concurrency": 2,
             "lifecycle": {

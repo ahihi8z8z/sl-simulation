@@ -282,13 +282,13 @@ class TestSimulationWithCsvModel:
             "simulation": {"duration": 5.0, "seed": 42},
             "services": [{
                 "service_id": "svc-a",
-                "arrival_rate": 2.0,
                 "max_concurrency": 4,
                 "lifecycle": lifecycle_with_csv,
             }],
             "cluster": {
                 "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}]
             },
+            "workload": {"arrival_rate": 2.0},
         }
 
         env = simpy.Environment()
@@ -331,13 +331,13 @@ class TestSimulationWithCsvModel:
             "simulation": {"duration": 10.0, "seed": 42},
             "services": [{
                 "service_id": "svc-a",
-                "arrival_rate": 5.0,
                 "max_concurrency": 1,  # force cold start for each request
                 "lifecycle": lifecycle_with_csv,
             }],
             "cluster": {
                 "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}]
             },
+            "workload": {"arrival_rate": 5.0},
         }
 
         env = simpy.Environment()

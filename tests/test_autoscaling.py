@@ -56,7 +56,6 @@ BASE_CONFIG = {
     "services": [
         {
             "service_id": "svc-a",
-            "arrival_rate": 2.0,
             "job_size": 0.1,
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
@@ -67,6 +66,7 @@ BASE_CONFIG = {
             {"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192},
         ]
     },
+    "workload": {"arrival_rate": 2.0},
 }
 
 
@@ -131,8 +131,8 @@ class TestAutoscaler:
             **BASE_CONFIG,
             "services": [{
                 **BASE_CONFIG["services"][0],
-                "arrival_rate": 0.1,  # very low to let instances go idle
             }],
+            "workload": {"arrival_rate": 0.1},  # very low to let instances go idle
         }
         ctx = _make_ctx(config)
         autoscaler = OpenWhiskPoolAutoscaler(ctx, reconcile_interval=100.0)  # very long reconcile

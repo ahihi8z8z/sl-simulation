@@ -36,7 +36,6 @@ SAMPLE_CONFIG = {
     "services": [
         {
             "service_id": "svc-a",
-            "arrival_rate": 10.0,
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
         }
@@ -44,6 +43,7 @@ SAMPLE_CONFIG = {
     "cluster": {
         "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}]
     },
+    "workload": {"arrival_rate": 10.0},
 }
 
 
@@ -73,7 +73,6 @@ class TestServiceClass:
         cfg = SAMPLE_CONFIG["services"][0]
         svc = ServiceClass.from_config(cfg)
         assert svc.service_id == "svc-a"
-        assert svc.arrival_rate == 10.0
         assert svc.peak_memory == 256
         assert svc.peak_cpu == 1.0
         assert svc.max_concurrency == 2
@@ -81,7 +80,6 @@ class TestServiceClass:
     def test_defaults(self):
         cfg = {
             "service_id": "svc-b",
-            "arrival_rate": 1.0,
             "max_concurrency": 1,
             "lifecycle": {
                 "cold_start_chain": ["null", "prewarm", "warm"],
@@ -105,7 +103,6 @@ class TestServiceClass:
         svc = ServiceClass.from_config(cfg)
         assert svc.min_instances == 0
         assert svc.max_instances == 0
-        assert svc.arrival_mode == "poisson"
 
 
 # ------------------------------------------------------------------ #
@@ -131,7 +128,7 @@ class TestPoissonGenerator:
         ctx = _make_ctx(duration=10.0, seed=42)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
 
-        gen = PoissonFixedSizeGenerator()
+        gen = PoissonFixedSizeGenerator(arrival_rate=10.0)
         gen.attach(ctx)
         gen.start_for_service(svc)
 
@@ -145,7 +142,7 @@ class TestPoissonGenerator:
         ctx = _make_ctx(duration=5.0, seed=123)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
 
-        gen = PoissonFixedSizeGenerator()
+        gen = PoissonFixedSizeGenerator(arrival_rate=10.0)
         gen.attach(ctx)
         gen.start_for_service(svc)
 
@@ -162,7 +159,7 @@ class TestPoissonGenerator:
         for _ in range(2):
             ctx = _make_ctx(duration=10.0, seed=99)
             svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
-            gen = PoissonFixedSizeGenerator()
+            gen = PoissonFixedSizeGenerator(arrival_rate=10.0)
             gen.attach(ctx)
             gen.start_for_service(svc)
             ctx.env.run(until=10.0)
@@ -179,7 +176,6 @@ class TestWorkloadManager:
         ctx = _make_ctx()
         wm = WorkloadManager.from_config(ctx)
         assert "svc-a" in wm.services
-        assert wm.services["svc-a"].arrival_rate == 10.0
 
     def test_start_generates_requests(self):
         ctx = _make_ctx(duration=10.0, seed=42)
@@ -195,9 +191,9 @@ class TestWorkloadManager:
     def test_register_multiple_services(self):
         ctx = _make_ctx()
         wm = WorkloadManager(ctx)
-        svc_a = ServiceClass(service_id="svc-a", arrival_rate=5.0,
+        svc_a = ServiceClass(service_id="svc-a",
                              max_concurrency=1)
-        svc_b = ServiceClass(service_id="svc-b", arrival_rate=2.0,
+        svc_b = ServiceClass(service_id="svc-b",
                              max_concurrency=2)
         wm.register_service(svc_a)
         wm.register_service(svc_b)
@@ -311,7 +307,7 @@ class TestAggregateTraceGenerator:
         ])
         ctx = _make_ctx(duration=60.0)
         svc_a = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
-        svc_b = ServiceClass(service_id="svc-b", arrival_rate=1.0,
+        svc_b = ServiceClass(service_id="svc-b",
                              max_concurrency=1)
 
         gen = AggregateTraceGenerator(path)

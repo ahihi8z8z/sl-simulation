@@ -21,7 +21,7 @@ class WorkloadManager:
     def register_service(self, service: ServiceClass) -> None:
         """Register a service class."""
         self.services[service.service_id] = service
-        self.ctx.logger.info("Registered service: %s (rate=%.1f)", service.service_id, service.arrival_rate)
+        self.ctx.logger.info("Registered service: %s", service.service_id)
 
     def start(self, stop_time: float | None = None) -> None:
         """Start arrival generators for all registered services.
@@ -79,7 +79,8 @@ class WorkloadManager:
                                               scale_alpha=scale_alpha,
                                               scale_beta=scale_beta)
         else:
-            generator = PoissonFixedSizeGenerator()
+            arrival_rate = workload_cfg.get("arrival_rate", 1.0)
+            generator = PoissonFixedSizeGenerator(arrival_rate=arrival_rate)
 
         wm = cls(ctx, generator=generator)
         for svc_cfg in ctx.config["services"]:

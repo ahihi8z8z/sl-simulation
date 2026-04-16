@@ -33,7 +33,6 @@ SAMPLE_CONFIG = {
     "services": [
         {
             "service_id": "svc-a",
-            "arrival_rate": 1.0,
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
         }

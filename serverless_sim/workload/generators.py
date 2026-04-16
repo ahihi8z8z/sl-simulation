@@ -176,9 +176,10 @@ class GammaWindowGenerator(BaseGenerator):
 class PoissonFixedSizeGenerator(BaseGenerator):
     """Exponential inter-arrival times."""
 
-    def __init__(self):
+    def __init__(self, arrival_rate: float = 1.0):
         self.ctx: SimContext | None = None
         self._request_counter = 0
+        self._arrival_rate = arrival_rate
 
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
@@ -190,7 +191,7 @@ class PoissonFixedSizeGenerator(BaseGenerator):
         ctx = self.ctx
         rng = ctx.rng
         env = ctx.env
-        mean_interval = 1.0 / service.arrival_rate
+        mean_interval = 1.0 / self._arrival_rate
 
         while True:
             if stop_time is not None and env.now >= stop_time:

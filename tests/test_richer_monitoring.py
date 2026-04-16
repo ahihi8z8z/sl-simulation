@@ -67,13 +67,11 @@ MULTI_SERVICE_CONFIG = {
     "services": [
         {
             "service_id": "svc-api",
-            "arrival_rate": 10.0,
             "max_concurrency": 8,
             "lifecycle": LIFECYCLE_256_05,
         },
         {
             "service_id": "svc-worker",
-            "arrival_rate": 2.0,
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_1024_2,
         },
@@ -85,6 +83,7 @@ MULTI_SERVICE_CONFIG = {
     },
     "autoscaling": {"enabled": True, "reconcile_interval": 2.0},
     "monitoring": {"interval": 1.0, "max_history_length": 100},
+    "workload": {"arrival_rate": 10.0},
 }
 
 

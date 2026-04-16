@@ -21,7 +21,6 @@ def _make_ctx(seed=42):
         "services": [
             {
                 "service_id": "svc-a",
-                "arrival_rate": 5.0,
                 "max_concurrency": 4,
                 "lifecycle": {
                     "cold_start_chain": ["null", "prewarm", "warm"],
@@ -47,6 +46,7 @@ def _make_ctx(seed=42):
             "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}]
         },
         "monitoring": {"interval": 1.0, "max_history_length": 100},
+        "workload": {"arrival_rate": 5.0},
     }
     env = simpy.Environment()
     rng = np.random.default_rng(seed)

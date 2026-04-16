@@ -45,7 +45,6 @@ SLOW_SERVICE_CONFIG = {
     "services": [
         {
             "service_id": "svc-slow",
-            "arrival_rate": 5.0,
             # 2s service time configured via service_time provider
             "max_concurrency": 1,
             "lifecycle": LIFECYCLE_256_1,
@@ -55,6 +54,7 @@ SLOW_SERVICE_CONFIG = {
         "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}]
     },
     "monitoring": {"interval": 1.0, "max_history_length": 100},
+    "workload": {"arrival_rate": 5.0},
 }
 
 

@@ -46,7 +46,6 @@ EXTENDED_CONFIG = {
     "services": [
         {
             "service_id": "svc-ext",
-            "arrival_rate": 3.0,
             "job_size": 0.1,
             "max_concurrency": 4,
             "lifecycle": EXTENDED_LIFECYCLE,
@@ -56,6 +55,7 @@ EXTENDED_CONFIG = {
         "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 16384}]
     },
     "monitoring": {"interval": 1.0, "max_history_length": 100},
+    "workload": {"arrival_rate": 3.0},
 }
 
 
@@ -217,7 +217,6 @@ class TestPromoteInstance:
             **EXTENDED_CONFIG,
             "services": [{
                 **EXTENDED_CONFIG["services"][0],
-                "arrival_rate": 0.0,  # no auto-generated requests
             }],
             "autoscaling": {"enabled": True, "reconcile_interval": 100.0},
         }

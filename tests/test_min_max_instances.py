@@ -48,12 +48,11 @@ def _make_config(
     node_memory=8192,
     pool_targets=None,
 ):
-    return {
+    config = {
         "simulation": {"duration": 100.0, "seed": 42, "export_mode": 0},
         "services": [
             {
                 "service_id": "svc-a",
-                "arrival_rate": arrival_rate,
                 "max_concurrency": max_concurrency,
                 "min_instances": min_instances,
                 "max_instances": max_instances,
@@ -66,6 +65,9 @@ def _make_config(
             ]
         },
     }
+    if arrival_rate > 0.0:
+        config["workload"] = {"arrival_rate": arrival_rate}
+    return config
 
 
 def _make_ctx(config, seed=42):
@@ -487,7 +489,6 @@ class TestValidation:
 
         cfg = {
             "service_id": "svc-test",
-            "arrival_rate": 1.0,
             "max_concurrency": 1,
             "lifecycle": _make_lifecycle(memory=128, cpu=0.5),
         }
