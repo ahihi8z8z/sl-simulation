@@ -270,12 +270,17 @@ class LeastLoadedBalancer(BaseLoadBalancer):
 class PowerOfTwoChoicesBalancer(BaseLoadBalancer):
     """Random 2 nodes, prefer least loaded. Fallback to all."""
 
+    def __init__(self, ctx: SimContext):
+        super().__init__(ctx)
+        import numpy as np
+        self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
+
     def _get_candidate_nodes(self, invocation: Invocation) -> list[Node]:
         nodes = self.ctx.cluster_manager.get_enabled_nodes()
         if len(nodes) <= 2:
             return nodes
 
-        rng = self.ctx.rng
+        rng = self._rng
         indices = rng.choice(len(nodes), size=2, replace=False)
         picked = [nodes[i] for i in indices]
         # Sort by flavor remaining (most free first)

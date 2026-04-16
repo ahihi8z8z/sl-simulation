@@ -30,6 +30,8 @@ import warnings
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from serverless_sim.workload.generators import BaseGenerator
 
 if TYPE_CHECKING:
@@ -127,6 +129,7 @@ class TraceReplayGenerator(BaseGenerator):
 
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
+        self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
 
     def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
         """Start replay for a specific service (filters records by function_id)."""
@@ -291,6 +294,7 @@ class AggregateTraceGenerator(BaseGenerator):
 
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
+        self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
 
     def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
         """Start replay for a specific service."""

@@ -55,6 +55,7 @@ SLOW_SERVICE_CONFIG = {
     },
     "monitoring": {"interval": 1.0, "max_history_length": 100},
     "workload": {"arrival_rate": 5.0},
+    "service_time": {"mode": "fixed", "duration": 2.0},
 }
 
 

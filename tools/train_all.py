@@ -35,7 +35,7 @@ def train_experiment(name: str, sim_config: dict, rl_config: dict,
             rl_path = f.name
             tmp_files.append(rl_path)
 
-        cmd = [sys.executable, "-m", "serverless_sim.runtime.cli", "train",
+        cmd = [sys.executable, "-m", "serverless_sim", "train",
                "--sim-config", sim_path, "--rl-config", rl_path,
                "--run-name", name]
 

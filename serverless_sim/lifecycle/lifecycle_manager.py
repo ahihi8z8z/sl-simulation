@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+import numpy as np
 import simpy
 
 from serverless_sim.cluster.resource_profile import ResourceProfile
@@ -25,6 +26,7 @@ class LifecycleManager:
     def __init__(self, ctx: SimContext):
         self.ctx = ctx
         self.logger = ctx.logger
+        self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
 
         # node_id → list of ContainerInstance (only alive instances)
         self.instances: dict[str, list[ContainerInstance]] = {}
@@ -69,7 +71,7 @@ class LifecycleManager:
         """
         sm = self._get_sm(service_id)
         if sm.state_resource_model is not None:
-            sample = sm.state_resource_model.sample(state, self.ctx.rng)
+            sample = sm.state_resource_model.sample(state, self._rng)
             return ResourceProfile(cpu=sample.cpu, memory=sample.memory)
         sd = sm.get_state(state)
         if sd is None:
@@ -171,7 +173,7 @@ class LifecycleManager:
             self._transition_state(node, instance, "warm")
             return instance
 
-        rng = self.ctx.rng
+        rng = self._rng
 
         for i in range(len(path) - 1):
             s_from = path[i]
@@ -243,7 +245,7 @@ class LifecycleManager:
             path = ["null", target_state]
 
         # Walk the path, applying transitions and state resource changes
-        rng = self.ctx.rng
+        rng = self._rng
         for i in range(len(path) - 1):
             from_state = path[i]
             to_state = path[i + 1]

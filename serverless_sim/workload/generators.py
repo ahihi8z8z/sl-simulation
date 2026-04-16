@@ -4,6 +4,8 @@ import csv as csv_mod
 import math
 from typing import TYPE_CHECKING
 
+import numpy as np
+
 from serverless_sim.workload.invocation import Invocation
 
 if TYPE_CHECKING:
@@ -12,7 +14,12 @@ if TYPE_CHECKING:
 
 
 class BaseGenerator:
-    """Interface for workload generators."""
+    """Interface for workload generators.
+
+    Each generator gets its own rng (spawned from ctx.rng at attach time)
+    so that arrival timing is deterministic regardless of what other
+    modules (lifecycle, autoscaler) do with the shared rng.
+    """
 
     def attach(self, ctx: SimContext) -> None:
         raise NotImplementedError
@@ -31,7 +38,7 @@ class BaseGenerator:
             status="arrived",
         )
         if ctx.service_time_provider is not None:
-            ctx.service_time_provider.assign(inv, ctx.rng)
+            ctx.service_time_provider.assign(inv, self._rng)
         ctx.request_table[request_id] = inv
         return inv
 
@@ -52,18 +59,20 @@ class GammaArrivalGenerator(BaseGenerator):
     def __init__(self, alpha: float = 1.0, beta: float = 1.0):
         self.ctx: SimContext | None = None
         self._request_counter = 0
+        self._rng = None
         self._alpha = alpha
         self._beta = beta
 
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
+        self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
 
     def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
         self.ctx.env.process(self._arrival_loop(service, stop_time))
 
     def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None):
         ctx = self.ctx
-        rng = ctx.rng
+        rng = self._rng
         env = ctx.env
         scale = 1.0 / self._beta
 
@@ -92,6 +101,7 @@ class GammaWindowGenerator(BaseGenerator):
     def __init__(self, csv_path: str, scale_alpha: float = 1.0, scale_beta: float = 1.0):
         self.ctx: SimContext | None = None
         self._request_counter = 0
+        self._rng = None
         self._csv_path = csv_path
         self._scale_alpha = scale_alpha
         self._scale_beta = scale_beta
@@ -99,6 +109,7 @@ class GammaWindowGenerator(BaseGenerator):
 
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
+        self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
         self._load_windows()
 
     def _load_windows(self) -> None:
@@ -139,7 +150,7 @@ class GammaWindowGenerator(BaseGenerator):
 
     def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None):
         ctx = self.ctx
-        rng = ctx.rng
+        rng = self._rng
         env = ctx.env
 
         while True:
@@ -179,17 +190,19 @@ class PoissonFixedSizeGenerator(BaseGenerator):
     def __init__(self, arrival_rate: float = 1.0):
         self.ctx: SimContext | None = None
         self._request_counter = 0
+        self._rng = None
         self._arrival_rate = arrival_rate
 
     def attach(self, ctx: SimContext) -> None:
         self.ctx = ctx
+        self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
 
     def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
         self.ctx.env.process(self._arrival_loop(service, stop_time))
 
     def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None):
         ctx = self.ctx
-        rng = ctx.rng
+        rng = self._rng
         env = ctx.env
         mean_interval = 1.0 / self._arrival_rate
 
