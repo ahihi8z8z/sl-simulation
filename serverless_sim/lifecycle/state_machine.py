@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import os
 
 from serverless_sim.lifecycle.state_definition import StateDefinition
 from serverless_sim.lifecycle.transition_definition import TransitionDefinition
@@ -9,7 +8,6 @@ from serverless_sim.lifecycle.transition_model import (
     BaseTransitionModel,
     BaseStateResourceModel,
     DeterministicTransitionModel,
-    FixedStateResourceModel,
 )
 
 

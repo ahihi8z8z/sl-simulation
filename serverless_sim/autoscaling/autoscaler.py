@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
-
-
-from serverless_sim.lifecycle.container_instance import ContainerInstance
 
 if TYPE_CHECKING:
     from serverless_sim.core.simulation.sim_context import SimContext
@@ -174,7 +170,6 @@ class OpenWhiskPoolAutoscaler:
         """
         lm = self.ctx.lifecycle_manager
         max_inst = self._max_instances.get(service_id, 0)
-        pending = self._pending.get(service_id, 0)
 
         def _total():
             return self._count_total_instances(service_id) + self._pending.get(service_id, 0)
@@ -185,10 +180,9 @@ class OpenWhiskPoolAutoscaler:
             return _total() < max_inst
 
         # Try to free slots if needed
-        freed = 0
         if max_inst > 0 and (_total() + count) > max_inst:
             needed = min(count, _total() + count - max_inst)
-            freed = self._evict_lower_priority_for_budget(service_id, target_state, needed)
+            self._evict_lower_priority_for_budget(service_id, target_state, needed)
 
         if self.pool_mode == "global":
             placement = self.ctx.placement_strategy

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
 from serverless_sim.monitoring.monitor_api import MonitorAPI

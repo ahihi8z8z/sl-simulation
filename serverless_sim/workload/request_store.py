@@ -8,7 +8,7 @@ requests finalise, so the full table never needs to be held in memory.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from serverless_sim.export.batch_csv_writer import BatchCSVWriter

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv as csv_mod
+import math
 from typing import TYPE_CHECKING
 
 from serverless_sim.workload.invocation import Invocation
@@ -100,9 +102,6 @@ class GammaWindowGenerator(BaseGenerator):
         self._load_windows()
 
     def _load_windows(self) -> None:
-        import csv as csv_mod
-        import math
-
         with open(self._csv_path, newline="") as f:
             reader = csv_mod.DictReader(f)
             for row in reader:
