@@ -73,6 +73,23 @@ class ClusterCollector(BaseCollector):
         metrics["cluster.flavor_cpu_used"] = flavor_cpu
         metrics["cluster.flavor_memory_used"] = flavor_mem
 
+        # Active servers and power consumption
+        active_servers = 0
+        if ctx.lifecycle_manager is not None:
+            active_servers = sum(
+                1 for n in nodes
+                if len(ctx.lifecycle_manager.get_instances_for_node(n.node_id)) > 0
+            )
+        metrics["cluster.active_servers"] = active_servers
+
+        # Power model: P = active_servers * P_base + (cpu_used / R_cap) * (P_max - P_base)
+        cluster_cfg = ctx.config.get("cluster", {})
+        power_base = cluster_cfg.get("power_base", 90.0)
+        power_max = cluster_cfg.get("power_max", 150.0)
+        node_cpu_cap = nodes[0].capacity.cpu if nodes else 1.0
+        power = active_servers * power_base + (used_cpu / node_cpu_cap) * (power_max - power_base)
+        metrics["cluster.power"] = power
+
         return metrics
 
 

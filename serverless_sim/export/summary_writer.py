@@ -71,6 +71,22 @@ class SummaryWriter:
             flavor_cpu = sum(n.flavor_cpu_used for n in nodes)
             flavor_mem = sum(n.flavor_memory_used for n in nodes)
 
+            # Power model params
+            cluster_cfg = self.ctx.config.get("cluster", {})
+            power_base = cluster_cfg.get("power_base", 90.0)
+            power_max = cluster_cfg.get("power_max", 150.0)
+
+            # Average power from resource-seconds
+            node_cpu_cap = nodes[0].capacity.cpu if nodes else 1.0
+            avg_cpu_used = eff["total_cpu_seconds"] / sim_end_time if sim_end_time > 0 else 0.0
+            # Active servers: approximate from total instances over time
+            lm = self.ctx.lifecycle_manager
+            active_servers_now = sum(
+                1 for n in nodes
+                if len(lm.get_instances_for_node(n.node_id)) > 0
+            ) if lm else 0
+            avg_power = active_servers_now * power_base + (avg_cpu_used / node_cpu_cap) * (power_max - power_base)
+
             summary["cluster_utilization"] = {
                 "cpu_total": cluster_cpu,
                 "memory_total": cluster_mem,
@@ -81,6 +97,10 @@ class SummaryWriter:
                 "flavor_memory_used": round(flavor_mem, 2),
                 "flavor_cpu_utilization": round(flavor_cpu / cluster_cpu, 4) if cluster_cpu > 0 else 0.0,
                 "flavor_memory_utilization": round(flavor_mem / cluster_mem, 4) if cluster_mem > 0 else 0.0,
+                "active_servers": active_servers_now,
+                "power_base": power_base,
+                "power_max": power_max,
+                "avg_power": round(avg_power, 2),
             }
 
             # Lifecycle: count actual instances from lifecycle_manager
