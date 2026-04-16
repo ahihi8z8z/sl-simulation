@@ -1,92 +1,43 @@
-"""Run simulations for all config files in an experimental directory.
+"""Run simulations for experiments defined in experiments.json.
 
 Usage:
-    python tools/run_experiments.py [--exp-dir experimental/min_baseline] [--parallel 4]
+    python tools/run_experiments.py experimental/experiments.json
+    python tools/run_experiments.py experimental/experiments.json --filter default
+    python tools/run_experiments.py experimental/experiments.json --parallel 4
+    python tools/run_experiments.py experimental/experiments.json --dump-config default_baseline
 """
 
 import argparse
-import glob
 import json
 import os
 import sys
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 
-# Ensure serverless_sim is importable when running as script
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-def _run_worker(config_path: str, sweep_dir: str) -> tuple[str, dict, float]:
-    """Worker function for parallel execution. Returns (name, summary, elapsed)."""
-    # Re-insert path for subprocess
+def _run_single(config: dict, name: str, run_dir: str, progress: bool = False) -> dict:
+    """Run one simulation from a merged config dict. Returns summary."""
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-    from serverless_sim.core.config.loader import load_config
+    from serverless_sim.core.config.loader import load_config_from_dict
     from serverless_sim.core.logging.logger_factory import create_logger
     from serverless_sim.core.simulation.sim_builder import SimulationBuilder
     from serverless_sim.core.simulation.sim_engine import SimulationEngine
 
-    base_name = os.path.splitext(os.path.basename(config_path))[0]
-    t0 = time.monotonic()
-
-    try:
-        config = load_config(config_path)
-        run_dir = os.path.join(sweep_dir, base_name)
-        os.makedirs(run_dir, exist_ok=True)
-
-        logger = create_logger(
-            module_name=f"sim.{base_name}",
-            run_dir=run_dir,
-            mode="file",
-            level="WARNING",
-        )
-
-        builder = SimulationBuilder()
-        ctx = builder.build(config, run_dir, logger)
-
-        engine = SimulationEngine(ctx)
-        engine.setup()
-        engine.run(progress=False)
-        engine.shutdown()
-
-        summary_path = os.path.join(run_dir, "summary.json")
-        if os.path.exists(summary_path):
-            with open(summary_path) as f:
-                summary = json.load(f)
-        else:
-            summary = {}
-
-        elapsed = time.monotonic() - t0
-        return base_name, summary, elapsed
-
-    except Exception as e:
-        elapsed = time.monotonic() - t0
-        return base_name, {"error": str(e)}, elapsed
-
-
-def run_one(config_path: str, sweep_dir: str, progress: bool = False) -> dict:
-    """Run a single simulation (sequential mode)."""
-    from serverless_sim.core.config.loader import load_config
-    from serverless_sim.core.logging.logger_factory import create_logger
-    from serverless_sim.core.simulation.sim_builder import SimulationBuilder
-    from serverless_sim.core.simulation.sim_engine import SimulationEngine
-
-    config = load_config(config_path)
-
-    base_name = os.path.splitext(os.path.basename(config_path))[0]
-    run_dir = os.path.join(sweep_dir, base_name)
     os.makedirs(run_dir, exist_ok=True)
+    validated = load_config_from_dict(config)
 
     logger = create_logger(
-        module_name=f"sim.{base_name}",
+        module_name=f"sim.{name}",
         run_dir=run_dir,
         mode="file",
         level="WARNING",
     )
 
     builder = SimulationBuilder()
-    ctx = builder.build(config, run_dir, logger)
-
+    ctx = builder.build(validated, run_dir, logger)
     engine = SimulationEngine(ctx)
     engine.setup()
     engine.run(progress=progress)
@@ -99,8 +50,17 @@ def run_one(config_path: str, sweep_dir: str, progress: bool = False) -> dict:
     return {}
 
 
+def _run_worker(config: dict, name: str, run_dir: str) -> tuple[str, dict, float]:
+    """Worker for parallel execution."""
+    t0 = time.monotonic()
+    try:
+        summary = _run_single(config, name, run_dir)
+        return name, summary, time.monotonic() - t0
+    except Exception as e:
+        return name, {"error": str(e)}, time.monotonic() - t0
+
+
 def _format_result(name: str, summary: dict, elapsed: float) -> str:
-    """Format one result line."""
     if "error" in summary:
         return f"  {name}: FAILED in {elapsed:.1f}s — {summary['error']}"
     req = summary.get("requests", {})
@@ -117,7 +77,6 @@ def _format_result(name: str, summary: dict, elapsed: float) -> str:
 
 
 def _save_results_csv(results: dict, path: str) -> None:
-    """Save results as CSV."""
     import csv
     header = [
         "experiment", "total", "completed", "dropped", "truncated", "cold_starts",
@@ -162,7 +121,6 @@ def _save_results_csv(results: dict, path: str) -> None:
 
 
 def _print_table(results: dict) -> None:
-    """Print summary table."""
     print(f"\n{'='*120}")
     print(f"{'Experiment':<25} {'Total':>8} {'Done':>8} {'Drop':>8} {'Cold':>8} {'CPU eff':>10} {'Mem eff':>10} {'CPU/req':>10} {'Mem/req':>10}")
     print(f"{'-'*120}")
@@ -185,108 +143,91 @@ def _print_table(results: dict) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run all experiments in a directory")
-    parser.add_argument(
-        "--exp-dir",
-        default="experimental/min_baseline",
-        help="Directory containing experiment config JSONs",
-    )
-    parser.add_argument(
-        "--progress",
-        action="store_true",
-        help="Show progress bar (only in sequential mode)",
-    )
-    parser.add_argument(
-        "--filter",
-        default=None,
-        help="Only run configs matching this substring (e.g. 'Java')",
-    )
-    parser.add_argument(
-        "--parallel",
-        type=int,
-        default=1,
-        help="Number of parallel workers (default: 1 = sequential)",
-    )
+    parser = argparse.ArgumentParser(description="Run experiments from experiments.json")
+    parser.add_argument("experiments_file", help="Path to experiments.json")
+    parser.add_argument("--filter", default=None, help="Only run experiments matching substring")
+    parser.add_argument("--parallel", type=int, default=1, help="Parallel workers (default: 1)")
+    parser.add_argument("--progress", action="store_true", help="Show progress bar (sequential only)")
+    parser.add_argument("--dump-config", default=None, metavar="NAME",
+                        help="Dump merged config for an experiment and exit")
     args = parser.parse_args()
 
-    configs = sorted(glob.glob(os.path.join(args.exp_dir, "*.json")))
-    if args.filter:
-        configs = [c for c in configs if args.filter in os.path.basename(c)]
-    configs = [c for c in configs if os.path.basename(c) not in ("results.json", "results.csv")]
+    from tools.config_merge import load_experiments, load_merged_config
 
-    if not configs:
-        print(f"No JSON configs found in {args.exp_dir}")
+    base_path, data = load_experiments(args.experiments_file)
+    experiments = data["experiments"]
+
+    # Dump mode
+    if args.dump_config:
+        for exp in experiments:
+            if exp["name"] == args.dump_config:
+                config = load_merged_config(base_path, exp.get("overrides"))
+                print(json.dumps(config, indent=2))
+                return
+        print(f"Experiment '{args.dump_config}' not found")
         return
 
-    # Create sweep directory
-    exp_name = os.path.basename(os.path.normpath(args.exp_dir))
+    # Filter to simulation-only experiments (no rl_template)
+    sim_experiments = [e for e in experiments if "rl_template" not in e]
+    if args.filter:
+        sim_experiments = [e for e in sim_experiments if args.filter in e["name"]]
+
+    if not sim_experiments:
+        print("No matching experiments found")
+        return
+
+    # Output directory
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    sweep_dir = os.path.join("logs", f"sweep_{timestamp}_{exp_name}")
+    sweep_dir = os.path.join("logs", f"experiments_{timestamp}")
     os.makedirs(sweep_dir, exist_ok=True)
 
-    n_workers = min(args.parallel, len(configs))
-    mode = f"parallel ({n_workers} workers)" if n_workers > 1 else "sequential"
-
-    print(f"Found {len(configs)} experiments in {args.exp_dir}")
-    print(f"Sweep directory: {sweep_dir}")
-    print(f"Mode: {mode}\n")
-    for c in configs:
-        print(f"  {os.path.basename(c)}")
+    print(f"Running {len(sim_experiments)} experiments")
+    print(f"Output: {sweep_dir}\n")
+    for e in sim_experiments:
+        print(f"  {e['name']}")
     print()
+
+    # Build merged configs
+    jobs = []
+    for exp in sim_experiments:
+        config = load_merged_config(base_path, exp.get("overrides"))
+        run_dir = os.path.join(sweep_dir, exp["name"])
+        jobs.append((config, exp["name"], run_dir))
 
     results = {}
     t_total = time.monotonic()
+    n_workers = min(args.parallel, len(jobs))
 
     if n_workers > 1:
-        # Parallel execution with progress bar
-        try:
-            from tqdm import tqdm
-            use_tqdm = True
-        except ImportError:
-            use_tqdm = False
-
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             futures = {
-                executor.submit(_run_worker, cfg, sweep_dir): cfg
-                for cfg in configs
+                executor.submit(_run_worker, cfg, name, rd): name
+                for cfg, name, rd in jobs
             }
-            if use_tqdm:
-                pbar = tqdm(total=len(configs), desc="Sweep", unit="exp")
             for future in as_completed(futures):
                 name, summary, elapsed = future.result()
                 results[name] = summary
-                if use_tqdm:
-                    pbar.update(1)
-                    pbar.set_postfix_str(f"{name} ({elapsed:.0f}s)", refresh=False)
-                else:
-                    print(_format_result(name, summary, elapsed))
-            if use_tqdm:
-                pbar.close()
+                print(_format_result(name, summary, elapsed))
     else:
-        # Sequential execution
-        for i, config_path in enumerate(configs, 1):
-            name = os.path.splitext(os.path.basename(config_path))[0]
-            print(f"[{i}/{len(configs)}] Running {name}...")
+        for i, (config, name, run_dir) in enumerate(jobs, 1):
+            print(f"[{i}/{len(jobs)}] Running {name}...")
             t0 = time.monotonic()
-
             try:
-                summary = run_one(config_path, sweep_dir, progress=args.progress)
+                summary = _run_single(config, name, run_dir, progress=args.progress)
                 elapsed = time.monotonic() - t0
                 results[name] = summary
                 print(_format_result(name, summary, elapsed))
             except Exception as e:
                 elapsed = time.monotonic() - t0
-                print(f"  FAILED in {elapsed:.1f}s: {e}")
                 results[name] = {"error": str(e)}
+                print(f"  FAILED in {elapsed:.1f}s: {e}")
 
     total_elapsed = time.monotonic() - t_total
 
-    # Save combined results as CSV
     output_path = os.path.join(sweep_dir, "results.csv")
     _save_results_csv(results, output_path)
-    print(f"\nAll results saved to {output_path}")
+    print(f"\nResults saved to {output_path}")
     print(f"Total time: {total_elapsed:.1f}s")
-
     _print_table(results)
 
 

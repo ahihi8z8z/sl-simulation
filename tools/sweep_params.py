@@ -1,27 +1,22 @@
-"""Parameter sweep: apply sweep config on top of base simulation config.
+"""Parameter sweep using config merge.
 
 Sweep config format:
 {
-    "base_config": "experimental/toy/config.json",
+    "base": "experimental/base_config.json",
+    "overrides": {"services[0].min_instances": 2},
     "sweep": {
-        "workload.gamma_alpha": [0.3, 1.0, 5.0],
-        "workload.gamma_beta": [1.0, 2.0],
-        "services[0].autoscaling_defaults.pool_targets.prewarm": [0, 5, 10],
-        "services[0].autoscaling_defaults.idle_timeout": [10, 60]
+        "services[0].autoscaling_defaults.idle_timeout": [10, 30, 60, 120, 300]
     }
 }
 
 Usage:
-    python tools/sweep_params.py experimental/toy/sweep.json
-    python tools/sweep_params.py experimental/toy/sweep.json --parallel 8
+    python tools/sweep_params.py configs/sweep/sweep_idle.json
+    python tools/sweep_params.py configs/sweep/sweep_idle.json --parallel 8
 """
 
 from __future__ import annotations
 
 import argparse
-import copy
-import csv
-import itertools
 import json
 import os
 import sys
@@ -31,29 +26,11 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-def _set_nested(cfg: dict, path: str, value) -> None:
-    """Set a value at a dotted path, supporting [N] indexing."""
-    parts = path.replace("[", ".[").split(".")
-    obj = cfg
-    for part in parts[:-1]:
-        if part.startswith("[") and part.endswith("]"):
-            obj = obj[int(part[1:-1])]
-        else:
-            obj = obj.setdefault(part, {})
-    last = parts[-1]
-    if last.startswith("[") and last.endswith("]"):
-        obj[int(last[1:-1])] = value
-    else:
-        obj[last] = value
-
-
 def _short_key(path: str) -> str:
-    """Extract short key from dotted path for naming."""
     return path.split(".")[-1].replace("[0]", "")
 
 
-def _make_name(params: list[tuple[str, any]]) -> str:
-    """Create short name from param values."""
+def _make_name(params: list[tuple[str, object]]) -> str:
     parts = []
     for path, value in params:
         key = _short_key(path)
@@ -65,7 +42,6 @@ def _make_name(params: list[tuple[str, any]]) -> str:
 
 
 def _run_one(args: tuple) -> dict:
-    """Worker: run one simulation."""
     config_dict, name, run_dir = args
 
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -107,53 +83,52 @@ def main():
     parser.add_argument("--output-dir", default=None, help="Output directory")
     args = parser.parse_args()
 
+    from tools.config_merge import expand_sweep
+
     with open(args.sweep_config) as f:
         sweep_cfg = json.load(f)
 
-    base_path = sweep_cfg["base_config"]
-    sweep_params = sweep_cfg["sweep"]
-
-    # Resolve base_config path relative to sweep config
+    # Resolve base path relative to sweep config file
+    base_path = sweep_cfg["base"]
     if not os.path.isabs(base_path):
         sweep_dir = os.path.dirname(os.path.abspath(args.sweep_config))
         candidate = os.path.join(sweep_dir, base_path)
         if os.path.exists(candidate):
             base_path = candidate
 
-    with open(base_path) as f:
-        base_cfg = json.load(f)
+    overrides = sweep_cfg.get("overrides", {})
+    sweep_params = sweep_cfg.get("sweep", {})
 
-    paths = list(sweep_params.keys())
-    all_values = [sweep_params[p] for p in paths]
-    combos = list(itertools.product(*all_values))
-    total = len(combos)
+    configs = expand_sweep(base_path, overrides=overrides, sweep=sweep_params)
+    total = len(configs)
 
     timestamp = time.strftime("%Y%m%d_%H%M%S")
-    output_dir = args.output_dir or os.path.join("logs", f"sweep_{timestamp}_params")
+    output_dir = args.output_dir or os.path.join("logs", f"sweep_{timestamp}")
     os.makedirs(output_dir, exist_ok=True)
 
     print(f"Base config: {base_path}")
+    if overrides:
+        print(f"Overrides: {overrides}")
     print(f"Sweep parameters:")
-    for path in paths:
-        print(f"  {path}: {sweep_params[path]}")
+    for path, values in sweep_params.items():
+        print(f"  {path}: {values}")
     print(f"\n{total} combinations, output: {output_dir}, parallel: {args.parallel}\n")
 
     # Prepare jobs
     jobs = []
-    for combo in combos:
-        param_values = list(zip(paths, combo))
-        name = _make_name(param_values)
-        cfg = copy.deepcopy(base_cfg)
-        for path, value in param_values:
-            _set_nested(cfg, path, value)
+    for config, sweep_point in configs:
+        if sweep_point:
+            name = _make_name(list(sweep_point.items()))
+        else:
+            name = "baseline"
         run_dir = os.path.join(output_dir, name)
-        jobs.append((cfg, name, run_dir))
+        jobs.append((config, name, run_dir))
 
     # Run
     results = []
     t_total = time.monotonic()
 
-    if args.parallel > 1:
+    if args.parallel > 1 and total > 1:
         with ProcessPoolExecutor(max_workers=args.parallel) as executor:
             futures = {executor.submit(_run_one, job): job[1] for job in jobs}
             done = 0
@@ -192,63 +167,40 @@ def main():
 
     total_elapsed = time.monotonic() - t_total
 
-    # Save CSV
+    # Save results CSV
+    import csv
     csv_path = os.path.join(output_dir, "results.csv")
-    short_keys = [_short_key(p) for p in paths]
-    metric_cols = ["total", "completed", "dropped", "cold_starts",
-                   "drop_pct", "cold_start_pct", "latency_mean",
-                   "mem_per_req_pct", "wall_seconds"]
-    header = ["name"] + short_keys + metric_cols
-
+    header = ["name"] + list(sweep_params.keys()) + [
+        "total", "completed", "dropped", "cold_starts",
+        "drop_rate_pct", "cold_start_rate_pct", "latency_mean",
+        "cpu_eff", "mem_eff", "elapsed",
+    ]
     with open(csv_path, "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=header)
         writer.writeheader()
         for result in sorted(results, key=lambda r: r["name"]):
             s = result["summary"]
-            row = {"name": result["name"], "wall_seconds": round(result["elapsed"], 2)}
-
-            # Find matching job to get param values
-            for job in jobs:
-                if job[1] == result["name"]:
-                    cfg = job[0]
-                    for path, key in zip(paths, short_keys):
-                        parts = path.replace("[", ".[").split(".")
-                        obj = cfg
-                        for part in parts:
-                            if part.startswith("[") and part.endswith("]"):
-                                obj = obj[int(part[1:-1])]
-                            else:
-                                obj = obj[part]
-                        row[key] = obj
-                    break
-
             if "error" in s:
-                row["cold_start_pct"] = "ERROR"
-                writer.writerow(row)
+                writer.writerow({"name": result["name"], "elapsed": result["elapsed"]})
                 continue
-
-            r = s.get("requests", {})
-            cu = s.get("cluster_utilization", {})
-            eff = s.get("effective_resource_ratio", {})
+            req = s.get("requests", {})
+            rates = s.get("rates", {})
             lat = s.get("latency", {})
-            comp = max(r.get("completed", 1), 1)
-            cluster_mem = cu.get("memory_total", 1)
-
-            row.update({
-                "total": r.get("total", 0),
-                "completed": r.get("completed", 0),
-                "dropped": r.get("dropped", 0),
-                "cold_starts": r.get("cold_starts", 0),
-                "drop_pct": round(r.get("dropped", 0) / max(r.get("total", 1), 1) * 100, 2),
-                "cold_start_pct": round(r.get("cold_starts", 0) / comp * 100, 2),
-                "latency_mean": round(lat.get("mean", 0), 6),
-                "mem_per_req_pct": round(eff.get("memory_per_request", 0) / cluster_mem * 100, 4) if cluster_mem > 0 else 0,
-            })
+            ratio = s.get("effective_resource_ratio", {})
+            row = {
+                "name": result["name"],
+                "total": req.get("total", 0),
+                "completed": req.get("completed", 0),
+                "dropped": req.get("dropped", 0),
+                "cold_starts": req.get("cold_starts", 0),
+                "drop_rate_pct": rates.get("drop_rate_pct", ""),
+                "cold_start_rate_pct": rates.get("cold_start_rate_pct", ""),
+                "latency_mean": lat.get("mean", ""),
+                "cpu_eff": ratio.get("cpu_effective_ratio", ""),
+                "mem_eff": ratio.get("memory_effective_ratio", ""),
+                "elapsed": f"{result['elapsed']:.1f}",
+            }
             writer.writerow(row)
-
-    # Save sweep config copy
-    with open(os.path.join(output_dir, "sweep_config.json"), "w") as f:
-        json.dump(sweep_cfg, f, indent=2)
 
     print(f"\nResults saved to {csv_path}")
     print(f"Total time: {total_elapsed:.1f}s")
