@@ -13,7 +13,12 @@ if TYPE_CHECKING:
 
 
 class Node:
-    """Represents a single worker node with a simpy.Store request queue."""
+    """Worker node — container host with resource tracking.
+
+    Nodes hold containers and track resource usage. All scheduling
+    decisions (reuse, promote, cold start) are made by the central
+    load balancer, not by the node.
+    """
 
     def __init__(
         self,
@@ -45,11 +50,7 @@ class Node:
         self.flavor_cpu_used = compute_class.reserved_cpu
         self.flavor_memory_used = compute_class.reserved_memory
 
-        # Request queue (unbounded Store)
-        self.queue: simpy.Store = simpy.Store(env)
-
         self.enabled = True
-        self.max_queue_depth = compute_class.max_queue_depth  # 0 = unlimited
         self._ctx: SimContext | None = None  # set by ClusterManager when ctx is available
 
     # ------------------------------------------------------------------
@@ -58,7 +59,6 @@ class Node:
 
     def allocate(self, request: ResourceProfile) -> bool:
         """Try to allocate resources. Returns True on success."""
-        # Apply reserved on first allocation (node gets a pod)
         if not self._reserved_applied and (self.reserved.cpu > 0 or self.reserved.memory > 0):
             self.available = self.available.subtract(self.reserved)
             self._reserved_applied = True
@@ -72,7 +72,6 @@ class Node:
         """Release previously allocated resources."""
         self.allocated = self.allocated.subtract(request)
         self.available = self.available.add(request)
-        # Clamp to avoid float precision artifacts
         self.allocated = ResourceProfile(
             cpu=max(0.0, self.allocated.cpu),
             memory=max(0.0, self.allocated.memory),
@@ -83,7 +82,6 @@ class Node:
             cpu=min(max_avail_cpu, self.available.cpu),
             memory=min(max_avail_mem, self.available.memory),
         )
-        # Release reserved when no more containers
         if self._reserved_applied and self.allocated.cpu <= 0 and self.allocated.memory <= 0:
             self.available = self.available.add(self.reserved)
             self._reserved_applied = False
@@ -106,127 +104,8 @@ class Node:
         """Release flavor resources when evicting a container."""
         self.flavor_cpu_used -= cpu
         self.flavor_memory_used -= memory
-        # Clamp to avoid float precision artifacts
         self.flavor_cpu_used = max(0.0, self.flavor_cpu_used)
         self.flavor_memory_used = max(0.0, self.flavor_memory_used)
-
-    @property
-    def queue_depth(self) -> int:
-        """Current number of requests waiting in the queue."""
-        return len(self.queue.items)
-
-    @property
-    def queue_is_full(self) -> bool:
-        """True if queue has reached max_queue_depth (0 = never full)."""
-        if self.max_queue_depth <= 0:
-            return False
-        return self.queue_depth >= self.max_queue_depth
-
-    # ------------------------------------------------------------------
-    # Pull loop — processes requests from the queue
-    # ------------------------------------------------------------------
-
-    def start_pull_loop(self) -> None:
-        """Start the SimPy process that pulls requests from the queue."""
-        self.env.process(self._pull_loop())
-
-    def _pull_loop(self):
-        """Pull requests from the queue and process them via lifecycle manager."""
-        while True:
-            invocation = yield self.queue.get()
-            self.logger.debug(
-                "t=%.3f | %s | received request %s (service=%s)",
-                self.env.now,
-                self.node_id,
-                invocation.request_id,
-                invocation.service_id,
-            )
-            # If lifecycle manager is available, process the request
-            if self._ctx and self._ctx.lifecycle_manager:
-                self.env.process(self._process_request(invocation))
-
-    def _process_request(self, invocation):
-        """SimPy process: find/create instance → execute → complete."""
-        if not self._ctx or not self._ctx.lifecycle_manager:
-            return
-        lm = self._ctx.lifecycle_manager
-
-        # Try to find a warm reusable instance
-        instance = lm.find_reusable_instance(self, invocation.service_id)
-        cold_start = instance is None
-
-        if instance is None:
-            # Try to promote an intermediate instance (faster than full cold start)
-            promotable = lm.find_promotable_instance(self, invocation.service_id)
-            if promotable is not None:
-                promote_proc = lm.promote_instance(self, promotable)
-                instance = yield promote_proc
-            else:
-                # Check max_instances before cold start
-                if self._ctx.autoscaling_manager:
-                    max_inst = self._ctx.autoscaling_manager.get_max_instances(invocation.service_id)
-                    if max_inst > 0:
-                        total = self._ctx.autoscaling_manager._count_total_instances(invocation.service_id)
-                        if total >= max_inst:
-                            invocation.dropped = True
-                            invocation.drop_reason = "max_instances"
-                            invocation.status = "dropped"
-                            invocation.completion_time = self.env.now
-                            self._ctx.request_table.finalize(invocation)
-                            self.logger.debug(
-                                "t=%.3f | %s | DROP %s (max_instances=%d)",
-                                self.env.now, self.node_id,
-                                invocation.request_id, max_inst,
-                            )
-                            return
-
-                # Check if node has enough flavor capacity for a new container
-                service = self._ctx.workload_manager.services[invocation.service_id]
-                if not self.can_fit_flavor(service.peak_cpu, service.peak_memory):
-                    invocation.dropped = True
-                    invocation.drop_reason = "no_resources"
-                    invocation.status = "dropped"
-                    invocation.completion_time = self.env.now
-                    self._ctx.request_table.finalize(invocation)
-                    self.logger.debug(
-                        "t=%.3f | %s | DROP %s (no_resources, flavor_cpu=%.1f/%.1f, flavor_mem=%.0f/%.0f)",
-                        self.env.now, self.node_id,
-                        invocation.request_id,
-                        self.flavor_cpu_used, self.capacity.cpu,
-                        self.flavor_memory_used, self.capacity.memory,
-                    )
-                    return
-
-                # Full cold start: create new instance from null
-                cold_start_proc = lm.prepare_instance_for_service(self, invocation.service_id)
-                instance = yield cold_start_proc
-
-        # Acquire concurrency slot
-        req = instance.slots.request()
-        yield req
-
-        # Start execution
-        lm.start_execution(instance, invocation)
-        if cold_start:
-            invocation.cold_start = True
-
-        # Use pre-assigned service time
-        yield self.env.timeout(invocation.service_time)
-
-        # Release resources
-        lm.finish_execution(instance, invocation)
-        instance.slots.release(req)
-
-        invocation.status = "completed"
-        self._ctx.request_table.finalize(invocation)
-        self.logger.debug(
-            "t=%.3f | %s | completed %s (cold=%s, duration=%.3f)",
-            self.env.now,
-            self.node_id,
-            invocation.request_id,
-            cold_start,
-            invocation.service_time,
-        )
 
     def __repr__(self) -> str:
         return (

@@ -10,6 +10,7 @@ from serverless_sim.workload.workload_manager import WorkloadManager
 from serverless_sim.workload.invocation import Invocation
 from serverless_sim.workload.service_time import FixedServiceTime
 from serverless_sim.scheduling.load_balancer import ShardingContainerPoolBalancer
+from serverless_sim.lifecycle.lifecycle_manager import LifecycleManager
 
 
 LIFECYCLE_256_1 = {
@@ -61,6 +62,8 @@ def _make_ctx(config=None) -> SimContext:
     ctx.service_time_provider = FixedServiceTime(duration=0.1)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
+    ctx.lifecycle_manager = LifecycleManager(ctx)
+    ctx.cluster_manager.set_context(ctx)
     return ctx
 
 
@@ -79,20 +82,20 @@ class TestShardingBalancer:
         assert inv.dispatch_time == 0.0
 
     def test_affinity_same_service(self):
-        """Same service_id should hash to the same primary node."""
+        """Same service_id should hash to the same primary node when capacity allows."""
         ctx = _make_ctx()
         lb = ShardingContainerPoolBalancer(ctx)
 
-        node_ids = set()
-        for i in range(10):
+        node_ids = []
+        for i in range(4):
             inv = Invocation(request_id=f"r{i}", service_id="svc-a",
                              arrival_time=0.0, status="arrived")
             ctx.request_table[inv.request_id] = inv
             lb.dispatch(inv)
-            node_ids.add(inv.assigned_node_id)
+            node_ids.append(inv.assigned_node_id)
 
-        # All should go to the same node (same service_id hash)
-        assert len(node_ids) == 1
+        # All should go to the primary node (same service_id hash, capacity permits 4)
+        assert len(set(node_ids)) == 1
 
     def test_fallback_when_node_full(self):
         """When primary node has no memory, fallback to next node."""

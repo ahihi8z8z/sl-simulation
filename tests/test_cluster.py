@@ -117,20 +117,6 @@ class TestNode:
         # State should be unchanged
         assert node.available.cpu == 4.0
 
-    def test_queue_put_and_pull(self):
-        """Put a request into queue, verify the pull loop picks it up."""
-        env = simpy.Environment()
-        node = self._make_node(env)
-        node.start_pull_loop()
-
-        from serverless_sim.workload.invocation import Invocation
-        request = Invocation(request_id="req-1", service_id="svc-a")
-        env.process(self._put_request(env, node, request))
-        env.run(until=1.0)
-
-    @staticmethod
-    def _put_request(env, node, request):
-        yield node.queue.put(request)
 
 
 # ------------------------------------------------------------------ #
@@ -180,18 +166,3 @@ class TestClusterManager:
         except KeyError:
             pass
 
-    def test_start_all_and_put_request(self):
-        """Start all nodes and push a request into one."""
-        env = simpy.Environment()
-        cm = ClusterManager(env=env, config=SAMPLE_CONFIG)
-        cm.start_all()
-
-        from serverless_sim.workload.invocation import Invocation
-        request = Invocation(request_id="req-1", service_id="svc-a")
-        node = cm.get_node("node-0")
-        env.process(self._put(env, node, request))
-        env.run(until=1.0)
-
-    @staticmethod
-    def _put(env, node, request):
-        yield node.queue.put(request)

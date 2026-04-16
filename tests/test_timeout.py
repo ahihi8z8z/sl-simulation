@@ -130,15 +130,3 @@ class TestQueueDepthLimit:
         completed = ctx.request_table.counters.completed
         assert completed > 0, "Expected some requests to complete despite queue depth limit"
 
-    def test_node_max_queue_depth_from_config(self):
-        """Node should have max_queue_depth=5 from the cluster config."""
-        run_dir = tempfile.mkdtemp(prefix="test_queue_depth_cfg_")
-        logger = logging.getLogger("test_queue_depth_cfg")
-        logger.handlers.clear()
-        logger.setLevel(logging.WARNING)
-
-        builder = SimulationBuilder()
-        ctx = builder.build(QUEUE_LIMIT_CONFIG, run_dir, logger)
-
-        node = ctx.cluster_manager.get_node("node-0")
-        assert node.max_queue_depth == 5

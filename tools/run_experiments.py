@@ -170,7 +170,8 @@ def main():
     # Filter to simulation-only experiments (no rl_template)
     sim_experiments = [e for e in experiments if "rl_template" not in e]
     if args.filter:
-        sim_experiments = [e for e in sim_experiments if args.filter in e["name"]]
+        filters = [f.strip() for f in args.filter.split(",")]
+        sim_experiments = [e for e in sim_experiments if any(f in e["name"] for f in filters)]
 
     if not sim_experiments:
         print("No matching experiments found")

@@ -81,6 +81,5 @@ class ClusterManager:
             node._ctx = ctx
 
     def start_all(self) -> None:
-        """Start the pull loop on all nodes."""
-        for node in self.nodes.values():
-            node.start_pull_loop()
+        """No-op. Kept for backward compatibility with tests."""
+        pass

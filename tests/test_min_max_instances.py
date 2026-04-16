@@ -215,7 +215,6 @@ class TestMaxInstances:
 
         # Now send a request that would need a new instance
         # First use the 2 warm instances with long jobs to keep them occupied
-        node = ctx.cluster_manager.get_node("node-0")
         for inst in warm:
             inv = Invocation(
                 request_id=f"use-{inst.instance_id}",
@@ -231,9 +230,7 @@ class TestMaxInstances:
             service_id="svc-a",
             arrival_time=ctx.env.now,
         )
-        inv_drop.status = "arrived"
-        ctx.request_table.register(inv_drop)
-        node.queue.put(inv_drop)
+        ctx.dispatcher.dispatch(inv_drop)
 
         ctx.env.run(until=5.0)
 
@@ -278,7 +275,6 @@ class TestMaxInstances:
         assert total >= 3, f"Expected >= 3 total instances, got {total}"
 
         # Make all instances running with long jobs (max_concurrency=1, so fully occupied)
-        node = ctx.cluster_manager.get_node("node-0")
         warm = [
             i for i in ctx.lifecycle_manager.get_instances_for_node("node-0")
             if i.state == "warm"
@@ -299,9 +295,7 @@ class TestMaxInstances:
             service_id="svc-a",
             arrival_time=ctx.env.now,
         )
-        inv_drop.status = "arrived"
-        ctx.request_table.register(inv_drop)
-        node.queue.put(inv_drop)
+        ctx.dispatcher.dispatch(inv_drop)
 
         ctx.env.run(until=5.0)
 
@@ -324,7 +318,6 @@ class TestMaxInstances:
         assert total >= 1
 
         # Use the warm instance
-        node = ctx.cluster_manager.get_node("node-0")
         warm = [
             i for i in ctx.lifecycle_manager.get_instances_for_node("node-0")
             if i.state == "warm"
@@ -345,9 +338,7 @@ class TestMaxInstances:
             arrival_time=ctx.env.now,
         )
         inv_ok.service_time = 0.1
-        inv_ok.status = "arrived"
-        ctx.request_table.register(inv_ok)
-        node.queue.put(inv_ok)
+        ctx.dispatcher.dispatch(inv_ok)
 
         ctx.env.run(until=5.0)
 
@@ -366,7 +357,6 @@ class TestMaxInstances:
         ctx.env.run(until=2.0)
 
         # Use the warm instance
-        node = ctx.cluster_manager.get_node("node-0")
         warm = [
             i for i in ctx.lifecycle_manager.get_instances_for_node("node-0")
             if i.state == "warm"
@@ -387,9 +377,7 @@ class TestMaxInstances:
             service_id="svc-a",
             arrival_time=ctx.env.now,
         )
-        inv_drop.status = "arrived"
-        ctx.request_table.register(inv_drop)
-        node.queue.put(inv_drop)
+        ctx.dispatcher.dispatch(inv_drop)
 
         ctx.env.run(until=5.0)
 

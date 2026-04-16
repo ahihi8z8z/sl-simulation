@@ -1,13 +1,18 @@
 """Pluggable load balancer strategies.
 
-All strategies implement ``BaseLoadBalancer.dispatch()`` which routes
-an invocation to a node queue or drops it.
+All scheduling logic is centralized here. Strategies only decide
+node ordering via ``_get_candidate_nodes()``. The base class handles:
+  1. Find reusable instance → execute
+  2. Find promotable instance → promote → execute
+  3. Check max_instances
+  4. Reserve flavor → cold start → execute
+  5. Drop if nothing works
 
 Available strategies:
 - ``HashRingBalancer`` — consistent hash ring (OpenWhisk-style, default)
 - ``RoundRobinBalancer`` — cycle through nodes
-- ``LeastLoadedBalancer`` — pick node with most available memory
-- ``PowerOfTwoChoicesBalancer`` — random 2 nodes, pick least loaded (Knative-style)
+- ``LeastLoadedBalancer`` — pick node with most flavor capacity
+- ``PowerOfTwoChoicesBalancer`` — random 2 nodes, pick least loaded
 """
 
 from __future__ import annotations
@@ -17,65 +22,109 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from serverless_sim.cluster.node import Node
     from serverless_sim.core.simulation.sim_context import SimContext
+    from serverless_sim.lifecycle.container_instance import ContainerInstance
     from serverless_sim.workload.invocation import Invocation
 
 
 class BaseLoadBalancer:
-    """Interface for load balancing strategies."""
+    """Centralized request dispatcher."""
 
     def __init__(self, ctx: SimContext):
         self.ctx = ctx
         self.logger = ctx.logger
 
-    def dispatch(self, invocation: Invocation) -> bool:
-        """Route invocation to a node. Returns True if dispatched, False if dropped."""
-        raise NotImplementedError
+    # ------------------------------------------------------------------
+    # Subclass interface
+    # ------------------------------------------------------------------
 
-    def _get_enabled_nodes(self) -> list[Node]:
-        """Refresh and return enabled nodes."""
+    def _get_candidate_nodes(self, invocation: Invocation) -> list[Node]:
+        """Return nodes in preference order. Subclasses implement this."""
         return self.ctx.cluster_manager.get_enabled_nodes()
 
-    def _can_serve(self, node: Node, invocation: Invocation) -> bool:
-        """Check if node can serve this request.
+    # ------------------------------------------------------------------
+    # Unified dispatch (not overridden by subclasses)
+    # ------------------------------------------------------------------
 
-        Optimistic pre-check at dispatch time. Node does a definitive
-        re-check when processing (state may change between checks).
-
-        Accepts if queue not full AND one of:
-        1. Has a warm/reusable container with free slot
-        2. Has a promotable intermediate container
-        3. Has enough memory to create a new container (and max_instances not exceeded)
-        """
-        # Single-scan check for warm/reusable or promotable container
-        if self.ctx.lifecycle_manager:
-            reusable, promotable = self.ctx.lifecycle_manager.find_reusable_or_promotable(
-                node, invocation.service_id)
-            if reusable is not None or promotable is not None:
-                return True
-        # Check max_instances
-        if self.ctx.autoscaling_manager:
-            max_inst = self.ctx.autoscaling_manager.get_max_instances(invocation.service_id)
-            if max_inst > 0:
-                total = self.ctx.autoscaling_manager._count_total_instances(invocation.service_id)
-                if total >= max_inst:
-                    return False
-        # Check flavor capacity for new container
-        service = self.ctx.workload_manager.services.get(invocation.service_id)
-        if service is None:
+    def dispatch(self, invocation: Invocation) -> bool:
+        """Central dispatch: reuse → promote → cold start → drop."""
+        lm = self.ctx.lifecycle_manager
+        if lm is None:
+            self._drop(invocation, "no_lifecycle_manager")
             return False
-        return node.can_fit_flavor(service.peak_cpu, service.peak_memory)
 
-    def _assign(self, invocation: Invocation, node: Node) -> None:
-        """Assign invocation to node and start processing directly."""
+        nodes = self._get_candidate_nodes(invocation)
+        if not nodes:
+            self._drop(invocation, "no_nodes")
+            return False
+
+        service_id = invocation.service_id
+        service = self.ctx.workload_manager.services.get(service_id)
+        if service is None:
+            self._drop(invocation, "unknown_service")
+            return False
+
+        # 1. Find reusable warm/running instance with free slot
+        for node in nodes:
+            instance = lm.find_reusable_instance(node, service_id)
+            if instance is not None:
+                self._dispatch_to_instance(invocation, node, instance)
+                return True
+
+        # 2. Find promotable intermediate instance
+        for node in nodes:
+            promotable = lm.find_promotable_instance(node, service_id)
+            if promotable is not None:
+                self._dispatch_promote(invocation, node, promotable)
+                return True
+
+        # 3. Check max_instances
+        if self.ctx.autoscaling_manager:
+            max_inst = self.ctx.autoscaling_manager.get_max_instances(service_id)
+            pending = self.ctx.autoscaling_manager._pending.get(service_id, 0)
+            if max_inst > 0:
+                total = self.ctx.autoscaling_manager._count_total_instances(service_id) + pending
+                if total >= max_inst:
+                    self._drop(invocation, "max_instances")
+                    return False
+
+        # 4. Cold start on first node with flavor capacity
+        for node in nodes:
+            if node.can_fit_flavor(service.peak_cpu, service.peak_memory):
+                node.reserve_flavor(service.peak_cpu, service.peak_memory)
+                self._dispatch_cold_start(invocation, node, service)
+                return True
+
+        self._drop(invocation, "no_capacity")
+        return False
+
+    # ------------------------------------------------------------------
+    # Dispatch helpers (schedule SimPy processes)
+    # ------------------------------------------------------------------
+
+    def _dispatch_to_instance(self, invocation: Invocation, node: Node,
+                              instance: ContainerInstance) -> None:
+        """Dispatch to an existing reusable instance."""
         invocation.assigned_node_id = node.node_id
         invocation.dispatch_time = self.ctx.env.now
-        invocation.queue_enter_time = self.ctx.env.now
         invocation.status = "dispatched"
-        # Process directly — no queue
-        node.env.process(node._process_request(invocation))
+        self.ctx.env.process(self._execute(invocation, node, instance))
+
+    def _dispatch_promote(self, invocation: Invocation, node: Node,
+                          instance: ContainerInstance) -> None:
+        """Promote intermediate instance then execute."""
+        invocation.assigned_node_id = node.node_id
+        invocation.dispatch_time = self.ctx.env.now
+        invocation.status = "dispatched"
+        self.ctx.env.process(self._promote_and_execute(invocation, node, instance))
+
+    def _dispatch_cold_start(self, invocation: Invocation, node: Node, service) -> None:
+        """Cold start a new container then execute. Flavor already reserved."""
+        invocation.assigned_node_id = node.node_id
+        invocation.dispatch_time = self.ctx.env.now
+        invocation.status = "dispatched"
+        self.ctx.env.process(self._cold_start_and_execute(invocation, node, service))
 
     def _drop(self, invocation: Invocation, reason: str) -> None:
-        """Drop an invocation."""
         invocation.dropped = True
         invocation.drop_reason = reason
         invocation.status = "dropped"
@@ -83,170 +132,162 @@ class BaseLoadBalancer:
         self.ctx.request_table.finalize(invocation)
         self.logger.debug(
             "t=%.3f | DROP | %s reason=%s",
-            self.ctx.env.now,
-            invocation.request_id,
-            reason,
+            self.ctx.env.now, invocation.request_id, reason,
+        )
+
+    # ------------------------------------------------------------------
+    # SimPy processes
+    # ------------------------------------------------------------------
+
+    def _execute(self, invocation: Invocation, node: Node,
+                 instance: ContainerInstance):
+        """SimPy process: acquire slot → execute → release."""
+        lm = self.ctx.lifecycle_manager
+
+        req = instance.slots.request()
+        yield req
+
+        lm.start_execution(instance, invocation)
+        invocation.cold_start = False
+        yield self.ctx.env.timeout(invocation.service_time)
+
+        lm.finish_execution(instance, invocation)
+        instance.slots.release(req)
+
+        invocation.status = "completed"
+        self.ctx.request_table.finalize(invocation)
+        self.logger.debug(
+            "t=%.3f | COMPLETED | %s on %s (reuse)",
+            self.ctx.env.now, invocation.request_id, node.node_id,
+        )
+
+    def _promote_and_execute(self, invocation: Invocation, node: Node,
+                             instance: ContainerInstance):
+        """SimPy process: promote → acquire slot → execute → release."""
+        lm = self.ctx.lifecycle_manager
+
+        promote_proc = lm.promote_instance(node, instance)
+        instance = yield promote_proc
+
+        req = instance.slots.request()
+        yield req
+
+        lm.start_execution(instance, invocation)
+        invocation.cold_start = True
+        yield self.ctx.env.timeout(invocation.service_time)
+
+        lm.finish_execution(instance, invocation)
+        instance.slots.release(req)
+
+        invocation.status = "completed"
+        self.ctx.request_table.finalize(invocation)
+        self.logger.debug(
+            "t=%.3f | COMPLETED | %s on %s (promoted)",
+            self.ctx.env.now, invocation.request_id, node.node_id,
+        )
+
+    def _cold_start_and_execute(self, invocation: Invocation, node: Node, service):
+        """SimPy process: cold start (flavor already reserved) → execute."""
+        lm = self.ctx.lifecycle_manager
+
+        cold_start_proc = lm.prepare_instance_for_service(node, invocation.service_id)
+        instance = yield cold_start_proc
+
+        req = instance.slots.request()
+        yield req
+
+        lm.start_execution(instance, invocation)
+        invocation.cold_start = True
+        yield self.ctx.env.timeout(invocation.service_time)
+
+        lm.finish_execution(instance, invocation)
+        instance.slots.release(req)
+
+        invocation.status = "completed"
+        self.ctx.request_table.finalize(invocation)
+        self.logger.debug(
+            "t=%.3f | COMPLETED | %s on %s (cold_start)",
+            self.ctx.env.now, invocation.request_id, node.node_id,
         )
 
 
-class HashRingBalancer(BaseLoadBalancer):
-    """Consistent-hashing load balancer (OpenWhisk-style).
+# ------------------------------------------------------------------
+# Strategies: only implement _get_candidate_nodes
+# ------------------------------------------------------------------
 
-    Hash ``service_id`` to pick a primary node, then walk the ring
-    looking for a node with capacity.
-    """
+class HashRingBalancer(BaseLoadBalancer):
+    """Consistent-hashing: hash service_id to primary, walk ring."""
 
     def __init__(self, ctx: SimContext):
         super().__init__(ctx)
         self._hash_cache: dict[str, int] = {}
 
-    def dispatch(self, invocation: Invocation) -> bool:
-        nodes = self._get_enabled_nodes()
+    def _get_candidate_nodes(self, invocation: Invocation) -> list[Node]:
+        nodes = self.ctx.cluster_manager.get_enabled_nodes()
         if not nodes:
-            self._drop(invocation, "no_nodes")
-            return False
-
+            return []
         n = len(nodes)
         primary_idx = self._hash_to_index(invocation.service_id, n)
-
-        for offset in range(n):
-            idx = (primary_idx + offset) % n
-            node = nodes[idx]
-            if self._can_serve(node, invocation):
-                self._assign(invocation, node)
-                self.logger.debug(
-                    "t=%.3f | DISPATCH | %s → %s (hash, offset=%d)",
-                    self.ctx.env.now, invocation.request_id, node.node_id, offset,
-                )
-                return True
-
-        self._drop(invocation, "no_capacity")
-        return False
+        return [nodes[(primary_idx + i) % n] for i in range(n)]
 
     def _hash_to_index(self, service_id: str, n: int) -> int:
         h = self._hash_cache.get(service_id)
         if h is None:
-            # Use hashlib for deterministic hashing (Python hash() varies per run)
             import hashlib
             h = int(hashlib.md5(service_id.encode()).hexdigest(), 16)
             self._hash_cache[service_id] = h
         return h % n
 
 
-# Backward-compatible alias
 ShardingContainerPoolBalancer = HashRingBalancer
 
 
 class RoundRobinBalancer(BaseLoadBalancer):
-    """Simple round-robin across enabled nodes."""
+    """Round-robin across enabled nodes."""
 
     def __init__(self, ctx: SimContext):
         super().__init__(ctx)
         self._counter = 0
 
-    def dispatch(self, invocation: Invocation) -> bool:
-        nodes = self._get_enabled_nodes()
+    def _get_candidate_nodes(self, invocation: Invocation) -> list[Node]:
+        nodes = self.ctx.cluster_manager.get_enabled_nodes()
         if not nodes:
-            self._drop(invocation, "no_nodes")
-            return False
-
+            return []
         n = len(nodes)
-
-        for offset in range(n):
-            idx = (self._counter + offset) % n
-            node = nodes[idx]
-            if self._can_serve(node, invocation):
-                self._assign(invocation, node)
-                self._counter = (idx + 1) % n
-                self.logger.debug(
-                    "t=%.3f | DISPATCH | %s → %s (round_robin)",
-                    self.ctx.env.now, invocation.request_id, node.node_id,
-                )
-                return True
-
-        self._drop(invocation, "no_capacity")
-        return False
+        ordered = [nodes[(self._counter + i) % n] for i in range(n)]
+        self._counter = (self._counter + 1) % n
+        return ordered
 
 
 class LeastLoadedBalancer(BaseLoadBalancer):
-    """Pick the node with the most available memory."""
+    """Pick node with most flavor capacity first."""
 
-    def dispatch(self, invocation: Invocation) -> bool:
-        nodes = self._get_enabled_nodes()
-        if not nodes:
-            self._drop(invocation, "no_nodes")
-            return False
-
-        # Filter nodes that can serve, pick the one with most available memory
-        candidates = [n for n in nodes if self._can_serve(n, invocation)]
-        if not candidates:
-            self._drop(invocation, "no_capacity")
-            return False
-
-        best = max(candidates, key=lambda n: n.capacity.memory - n.flavor_memory_used)
-        self._assign(invocation, best)
-        self.logger.debug(
-            "t=%.3f | DISPATCH | %s → %s (least_loaded, flavor_mem_free=%.0f)",
-            self.ctx.env.now, invocation.request_id, best.node_id,
-            best.capacity.memory - best.flavor_memory_used,
-        )
-        return True
+    def _get_candidate_nodes(self, invocation: Invocation) -> list[Node]:
+        nodes = self.ctx.cluster_manager.get_enabled_nodes()
+        return sorted(nodes, key=lambda n: n.capacity.memory - n.flavor_memory_used, reverse=True)
 
 
 class PowerOfTwoChoicesBalancer(BaseLoadBalancer):
-    """Random 2 nodes, pick the one with shorter queue (Knative-style).
+    """Random 2 nodes, prefer least loaded. Fallback to all."""
 
-    Falls back to scanning all nodes if both random choices are full.
-    """
+    def _get_candidate_nodes(self, invocation: Invocation) -> list[Node]:
+        nodes = self.ctx.cluster_manager.get_enabled_nodes()
+        if len(nodes) <= 2:
+            return nodes
 
-    def dispatch(self, invocation: Invocation) -> bool:
-        nodes = self._get_enabled_nodes()
-        if not nodes:
-            self._drop(invocation, "no_nodes")
-            return False
-
-        n = len(nodes)
-
-        if n == 1:
-            if self._can_serve(nodes[0], invocation):
-                self._assign(invocation, nodes[0])
-                return True
-            self._drop(invocation, "no_capacity")
-            return False
-
-        # Pick 2 random nodes
         rng = self.ctx.rng
-        indices = rng.choice(n, size=min(2, n), replace=False)
-        candidates = [nodes[i] for i in indices]
+        indices = rng.choice(len(nodes), size=2, replace=False)
+        picked = [nodes[i] for i in indices]
+        # Sort by flavor remaining (most free first)
+        picked.sort(key=lambda n: n.capacity.memory - n.flavor_memory_used, reverse=True)
 
-        # Filter acceptable candidates
-        acceptable = [nd for nd in candidates if self._can_serve(nd, invocation)]
-
-        if acceptable:
-            # Pick the one with shorter queue
-            best = min(acceptable, key=lambda nd: nd.queue_depth)
-            self._assign(invocation, best)
-            self.logger.debug(
-                "t=%.3f | DISPATCH | %s → %s (p2c, queue=%d)",
-                self.ctx.env.now, invocation.request_id, best.node_id, best.queue_depth,
-            )
-            return True
-
-        # Fallback: scan all nodes
-        for node in nodes:
-            if self._can_serve(node, invocation):
-                self._assign(invocation, node)
-                self.logger.debug(
-                    "t=%.3f | DISPATCH | %s → %s (p2c_fallback)",
-                    self.ctx.env.now, invocation.request_id, node.node_id,
-                )
-                return True
-
-        self._drop(invocation, "no_capacity")
-        return False
+        # Append remaining nodes as fallback
+        picked_set = set(id(n) for n in picked)
+        rest = [n for n in nodes if id(n) not in picked_set]
+        return picked + rest
 
 
-# Registry for config-driven selection
+# Registry
 LOAD_BALANCER_REGISTRY: dict[str, type[BaseLoadBalancer]] = {
     "hash_ring": HashRingBalancer,
     "round_robin": RoundRobinBalancer,
@@ -256,10 +297,6 @@ LOAD_BALANCER_REGISTRY: dict[str, type[BaseLoadBalancer]] = {
 
 
 def create_load_balancer(ctx: SimContext) -> BaseLoadBalancer:
-    """Create a load balancer from config.
-
-    Config key: ``scheduling.strategy`` (default: ``"hash_ring"``).
-    """
     strategy = ctx.config.get("scheduling", {}).get("strategy", "hash_ring")
     cls = LOAD_BALANCER_REGISTRY.get(strategy)
     if cls is None:

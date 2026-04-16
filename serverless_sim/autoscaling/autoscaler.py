@@ -184,6 +184,7 @@ class OpenWhiskPoolAutoscaler:
             needed = min(count, _total() + count - max_inst)
             self._evict_lower_priority_for_budget(service_id, target_state, needed)
 
+        service = self.ctx.workload_manager.services[service_id]
         if self.pool_mode == "global":
             placement = self.ctx.placement_strategy
             nodes = self.ctx.cluster_manager.get_enabled_nodes()
@@ -193,20 +194,20 @@ class OpenWhiskPoolAutoscaler:
                 node = placement.select_node(nodes, service_id, self.ctx)
                 if node is None:
                     break
+                node.reserve_flavor(service.peak_cpu, service.peak_memory)
                 self._pending[service_id] = self._pending.get(service_id, 0) + 1
                 lm.prepare_instance_for_service(node, service_id,
                                                  target_state=target_state,
                                                  pool_state=pool_state)
         else:
             nodes = self.ctx.cluster_manager.get_enabled_nodes()
-            service = self.ctx.workload_manager.services[service_id]
             for _ in range(count):
                 if not _has_budget():
                     break
-                # Round-robin across nodes that have flavor capacity
                 placed = False
                 for node in nodes:
                     if node.can_fit_flavor(service.peak_cpu, service.peak_memory):
+                        node.reserve_flavor(service.peak_cpu, service.peak_memory)
                         self._pending[service_id] = self._pending.get(service_id, 0) + 1
                         lm.prepare_instance_for_service(node, service_id,
                                                          target_state=target_state,

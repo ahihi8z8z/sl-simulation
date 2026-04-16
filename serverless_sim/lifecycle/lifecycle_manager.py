@@ -226,10 +226,9 @@ class LifecycleManager:
             if pending.get(service_id, 0) > 0:
                 pending[service_id] -= 1
 
-        # Reserve flavor resources on node (fixed for lifetime of container)
+        # Track flavor for release at eviction (reservation done by caller)
         inst.flavor_cpu = service.peak_cpu
         inst.flavor_memory = service.peak_memory
-        node.reserve_flavor(inst.flavor_cpu, inst.flavor_memory)
 
         # Allocate null state resources (typically 0)
         null_res = self._state_resources(service_id, "null")
