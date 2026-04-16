@@ -125,6 +125,7 @@ class VahidiniaEnv(gym.Env):
 
         self._engine = SimulationEngine(ctx)
         self._engine.setup()
+        ctx.workload_manager.start()
 
         self._monitor_api = MonitorAPI(ctx.monitor_manager)
         if ctx.autoscaling_manager:
