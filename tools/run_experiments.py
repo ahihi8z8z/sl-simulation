@@ -145,7 +145,8 @@ def _print_table(results: dict) -> None:
 def main():
     parser = argparse.ArgumentParser(description="Run experiments from experiments.json")
     parser.add_argument("experiments_file", help="Path to experiments.json")
-    parser.add_argument("--filter", default=None, help="Only run experiments matching substring")
+    parser.add_argument("--filter", default=None,
+                        help="Comma-separated exact experiment names to run")
     parser.add_argument("--parallel", type=int, default=1, help="Parallel workers (default: 1)")
     parser.add_argument("--progress", action="store_true", help="Show progress bar (sequential only)")
     parser.add_argument("--dump-config", default=None, metavar="NAME",
@@ -170,8 +171,8 @@ def main():
     # Filter to simulation-only experiments (no rl_template)
     sim_experiments = [e for e in experiments if "rl_template" not in e]
     if args.filter:
-        filters = [f.strip() for f in args.filter.split(",")]
-        sim_experiments = [e for e in sim_experiments if any(f in e["name"] for f in filters)]
+        wanted = {f.strip() for f in args.filter.split(",")}
+        sim_experiments = [e for e in sim_experiments if e["name"] in wanted]
 
     if not sim_experiments:
         print("No matching experiments found")

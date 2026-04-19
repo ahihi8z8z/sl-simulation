@@ -63,7 +63,8 @@ def train_experiment(name: str, sim_config: dict, rl_config: dict,
 def main():
     parser = argparse.ArgumentParser(description="Train RL agents from experiments.json")
     parser.add_argument("experiments_file", help="Path to experiments.json")
-    parser.add_argument("--filter", default=None, help="Only train experiments matching substring")
+    parser.add_argument("--filter", default=None,
+                        help="Comma-separated exact experiment names to train")
     args = parser.parse_args()
 
     from tools.config_merge import (
@@ -77,7 +78,8 @@ def main():
     # Filter to RL experiments only
     rl_experiments = [e for e in experiments if e.get("rl_template")]
     if args.filter:
-        rl_experiments = [e for e in rl_experiments if args.filter in e["name"]]
+        wanted = {f.strip() for f in args.filter.split(",")}
+        rl_experiments = [e for e in rl_experiments if e["name"] in wanted]
 
     if not rl_experiments:
         print("No matching RL experiments found")
