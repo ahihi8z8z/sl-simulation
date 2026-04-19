@@ -48,35 +48,52 @@ def load_log(log_dir: str) -> dict:
 
 
 def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> None:
-    """Grouped bar chart — groups are metrics, bars are runs."""
-    metrics_data = {"Cold Start %": [], "Avg Mem Util %": [], "Avg CPU Util %": []}
+    """Grouped bar chart — groups are metrics, bars are runs.
+
+    Cold start and memory utilization share a % axis; power is on its own axis (W).
+    """
+    pct_metrics = {"Cold Start %": [], "Drop %": [], "Avg Mem Util %": []}
+    power_metrics = {"Avg Power (W)": []}
 
     for log in logs:
         s = log.get("summary", {})
         r = s.get("requests", {})
         cu = s.get("cluster_utilization", {})
+        total = max(r.get("total", 1), 1)
         completed = max(r.get("completed", 1), 1)
-        metrics_data["Cold Start %"].append(r.get("cold_starts", 0) / completed * 100)
-        metrics_data["Avg Mem Util %"].append(cu.get("avg_memory_utilization", 0) * 100)
-        metrics_data["Avg CPU Util %"].append(cu.get("avg_cpu_utilization", 0) * 100)
+        pct_metrics["Cold Start %"].append(r.get("cold_starts", 0) / completed * 100)
+        pct_metrics["Drop %"].append(r.get("dropped", 0) / total * 100)
+        pct_metrics["Avg Mem Util %"].append(cu.get("avg_memory_utilization", 0) * 100)
 
-    metric_names = list(metrics_data.keys())
-    x = np.arange(len(metric_names))
+        metrics_csv = log.get("metrics")
+        if metrics_csv is not None and "cluster.power" in metrics_csv.columns:
+            power_metrics["Avg Power (W)"].append(metrics_csv["cluster.power"].mean())
+        else:
+            power_metrics["Avg Power (W)"].append(0)
+
     n_runs = len(labels)
-    width = 0.8 / n_runs
+    fig, (ax_pct, ax_pow) = plt.subplots(
+        1, 2, figsize=(max(12, n_runs * 3), 5),
+        gridspec_kw={"width_ratios": [2, 1]},
+    )
 
-    fig, ax = plt.subplots(figsize=(max(10, len(metric_names) * 3), 5))
-    for i, (label, color) in enumerate(zip(labels, COLORS)):
-        values = [metrics_data[m][i] for m in metric_names]
-        offset = (i - n_runs / 2 + 0.5) * width
-        bars = ax.bar(x + offset, values, width, label=label, color=color, alpha=0.85)
-        ax.bar_label(bars, fmt="%.1f", fontsize=7, label_type="center")
+    for ax, data in ((ax_pct, pct_metrics), (ax_pow, power_metrics)):
+        metric_names = list(data.keys())
+        x = np.arange(len(metric_names))
+        width = 0.8 / n_runs
+        for i, (label, color) in enumerate(zip(labels, COLORS)):
+            values = [data[m][i] for m in metric_names]
+            offset = (i - n_runs / 2 + 0.5) * width
+            bars = ax.bar(x + offset, values, width, label=label, color=color, alpha=0.85)
+            ax.bar_label(bars, fmt="%.1f", fontsize=7, label_type="center")
+        ax.set_xticks(x)
+        ax.set_xticklabels(metric_names)
+        ax.grid(axis="y", alpha=0.3)
 
-    ax.set_title("Performance Metrics Comparison")
-    ax.set_xticks(x)
-    ax.set_xticklabels(metric_names)
-    ax.legend(fontsize=8)
-    ax.grid(axis="y", alpha=0.3)
+    ax_pct.set_ylabel("%")
+    ax_pow.set_ylabel("Watts")
+    ax_pct.legend(fontsize=8)
+    fig.suptitle("Performance Metrics Comparison")
 
     plt.tight_layout()
     fig.savefig(os.path.join(output_dir, "comparison_metrics.png"), dpi=150)
@@ -224,43 +241,6 @@ def plot_container_comparison(logs: list[dict], labels: list[str], output_dir: s
     print(f"  Saved: comparison_containers.png")
 
 
-def plot_idle_window(logs: list[dict], labels: list[str], output_dir: str) -> None:
-    """Line chart comparing idle timeout window over time (hourly average)."""
-    fig, ax = plt.subplots(figsize=(12, 4))
-
-    for log, label, color in zip(logs, labels, COLORS):
-        metrics = log.get("metrics")
-        if metrics is None or len(metrics) == 0:
-            continue
-
-        # Find idle_timeout column (may have service prefix)
-        idle_col = None
-        for col in metrics.columns:
-            if "idle_timeout" in col:
-                idle_col = col
-                break
-        if idle_col is None:
-            continue
-
-        m = metrics.copy()
-        m["_hour"] = (m["time"] / 3600.0).astype(int)
-        hourly = m.groupby("_hour")[idle_col].mean()
-
-        ax.plot(hourly.index, hourly.values / 60.0, label=label, color=color,
-                linewidth=1.5, alpha=0.85)
-
-    ax.set_xlabel("Time (hours)")
-    ax.set_ylabel("Idle Timeout (minutes)")
-    ax.set_title("Idle Window Comparison (hourly avg)")
-    ax.legend(loc="upper right", fontsize=9)
-    ax.grid(alpha=0.3)
-
-    plt.tight_layout()
-    fig.savefig(os.path.join(output_dir, "comparison_idle_window.png"), dpi=150)
-    plt.close(fig)
-    print(f"  Saved: comparison_idle_window.png")
-
-
 def plot_pool_targets(logs: list[dict], labels: list[str], output_dir: str) -> None:
     """Line chart comparing pool_target decisions (prewarm + warm) over time."""
     n_runs = len(logs)
@@ -355,7 +335,6 @@ def main():
     plot_metrics_bar(logs, labels, args.output_dir)
     plot_latency_bar(logs, labels, args.output_dir)
     plot_container_comparison(logs, labels, args.output_dir, smooth=args.smooth)
-    plot_idle_window(logs, labels, args.output_dir)
     plot_pool_targets(logs, labels, args.output_dir)
     plot_latency_cdf(logs, labels, args.output_dir)
     print(f"\nAll plots in {args.output_dir}/")
