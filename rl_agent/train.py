@@ -9,7 +9,9 @@ import numpy as np
 from stable_baselines3 import PPO, A2C, DQN, SAC
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv, SubprocVecEnv, VecNormalize, VecFrameStack, unwrap_vec_normalize,
+)
 from sb3_contrib import MaskablePPO, RecurrentPPO
 
 
@@ -26,10 +28,10 @@ class CheckpointWithNormalize(BaseCallback):
         if self.num_timesteps % self.save_freq == 0:
             path = os.path.join(self.save_path, f"{self.name_prefix}_{self.num_timesteps}_steps")
             self.model.save(path)
-            # Save VecNormalize if present
-            env = self.model.get_env()
-            if isinstance(env, VecNormalize):
-                env.save(path + "_vecnormalize.pkl")
+            # Save VecNormalize if present (may be wrapped by VecFrameStack etc.)
+            vec_norm = unwrap_vec_normalize(self.model.get_env())
+            if vec_norm is not None:
+                vec_norm.save(path + "_vecnormalize.pkl")
             if self.verbose:
                 print(f"Checkpoint saved: {path}")
         return True
@@ -43,9 +45,9 @@ class _SaveVecNormOnBest(BaseCallback):
         self.save_path = save_path
 
     def _on_step(self) -> bool:
-        env = self.model.get_env()
-        if isinstance(env, VecNormalize):
-            env.save(os.path.join(self.save_path, "best_model_vecnormalize.pkl"))
+        vec_norm = unwrap_vec_normalize(self.model.get_env())
+        if vec_norm is not None:
+            vec_norm.save(os.path.join(self.save_path, "best_model_vecnormalize.pkl"))
         return True
 
 
@@ -148,6 +150,14 @@ def run_training(
     else:
         vec_env = DummyVecEnv(env_fns)
 
+    # Optional frame stacking (stack last N obs — gives agent temporal history).
+    # Must wrap BEFORE VecNormalize so off-policy algos (SAC/DQN) can call
+    # VecNormalize.get_original_obs() and get the stacked shape back for the
+    # replay buffer (buffer is allocated with stacked observation_space).
+    frame_stack = rl_config.get("frame_stack", 1)
+    if frame_stack > 1:
+        vec_env = VecFrameStack(vec_env, n_stack=frame_stack)
+
     # Optional VecNormalize wrapper
     normalize_obs = rl_config.get("normalize_obs", False)
     normalize_reward = rl_config.get("normalize_reward", False)
@@ -204,6 +214,7 @@ def run_training(
         model_kwargs["batch_size"] = rl_config.get("batch_size", 256)
         model_kwargs["learning_starts"] = rl_config.get("learning_starts", 1000)
         model_kwargs["train_freq"] = rl_config.get("train_freq", 1)
+        model_kwargs["gradient_steps"] = rl_config.get("gradient_steps", 1)
         model_kwargs["ent_coef"] = rl_config.get("ent_coef", "auto")
 
     # Resume from existing model or create new
@@ -247,6 +258,8 @@ def run_training(
     early_stop_patience = rl_config.get("early_stop_patience", 0)
     if eval_freq > 0:
         eval_env = DummyVecEnv([_make_env(env_class, sim_config_path, gym_config_path, seed=9999)])
+        if frame_stack > 1:
+            eval_env = VecFrameStack(eval_env, n_stack=frame_stack)
         if normalize_obs or normalize_reward:
             eval_env = VecNormalize(eval_env, norm_obs=normalize_obs, norm_reward=normalize_reward)
 
@@ -281,8 +294,9 @@ def run_training(
     # Save final model with versioned name
     model_path = os.path.join(save_dir, versioned_name)
     model.save(model_path)
-    if isinstance(vec_env, VecNormalize):
-        vec_env.save(model_path + "_vecnormalize.pkl")
+    vec_norm = unwrap_vec_normalize(vec_env)
+    if vec_norm is not None:
+        vec_norm.save(model_path + "_vecnormalize.pkl")
     print(f"Final model saved to {model_path}")
 
     # Copy best model to versioned path

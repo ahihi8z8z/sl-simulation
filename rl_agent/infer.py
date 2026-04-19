@@ -8,7 +8,7 @@ import os
 import numpy as np
 from stable_baselines3 import PPO, A2C, DQN, SAC
 from sb3_contrib import MaskablePPO, RecurrentPPO
-from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
+from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize, VecFrameStack
 
 
 ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "sac": SAC, "maskable_ppo": MaskablePPO, "recurrent_ppo": RecurrentPPO}
@@ -66,6 +66,8 @@ def run_inference(
     vec_norm_path = model_path + "_vecnormalize.pkl"
     has_vec_norm = os.path.exists(vec_norm_path)
 
+    frame_stack = rl_config.get("frame_stack", 1)
+
     # Run episodes
     all_rewards = []
     all_steps = []
@@ -86,6 +88,8 @@ def run_inference(
 
         if has_vec_norm:
             vec_env = DummyVecEnv([lambda: env])
+            if frame_stack > 1:
+                vec_env = VecFrameStack(vec_env, n_stack=frame_stack)
             vec_env = VecNormalize.load(vec_norm_path, vec_env)
             vec_env.training = False
             vec_env.norm_reward = False
