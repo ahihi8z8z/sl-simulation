@@ -84,7 +84,8 @@ class MultiDiscreteEnv(gym.Env):
 
         # Action space
         if self.continuous_action:
-            # Box: continuous values, round pool_targets on apply
+            # Normalized Box(-1, 1) per dimension; scaled to physical range inside step()
+            # so the Gaussian policy (init std=1) explores the full range.
             lows = []
             highs = []
             dm = self._action_mapper.delta_max
@@ -99,9 +100,14 @@ class MultiDiscreteEnv(gym.Env):
                 else:
                     lows.append(0.0)
                     highs.append(float(self._action_mapper.idle_timeout_max_minutes * 60))
+            self._action_low = np.array(lows, dtype=np.float32)
+            self._action_high = np.array(highs, dtype=np.float32)
+            n = len(lows)
             self.action_space = spaces.Box(
-                low=np.array(lows, dtype=np.float32),
-                high=np.array(highs, dtype=np.float32),
+                low=-1.0,
+                high=1.0,
+                shape=(n,),
+                dtype=np.float32,
             )
         elif self.flatten_action:
             self.action_space = spaces.Discrete(self._action_mapper.flat_n_actions)
@@ -191,6 +197,9 @@ class MultiDiscreteEnv(gym.Env):
         self._current_step += 1
 
         if self._autoscaling_api:
+            if self.continuous_action:
+                a = np.clip(np.asarray(action, dtype=np.float32).flatten(), -1.0, 1.0)
+                action = self._action_low + (a + 1.0) * 0.5 * (self._action_high - self._action_low)
             self._action_mapper.apply(action, self._autoscaling_api, continuous=self.continuous_action)
 
         ctx = self._engine.ctx

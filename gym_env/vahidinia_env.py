@@ -96,10 +96,12 @@ class VahidiniaEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # Action: one continuous value per service (idle-container window)
+        # Action: normalized in [-1, 1] per service, scaled to
+        # [idle_timeout_min, idle_timeout_max] on apply so the Gaussian
+        # policy (init std=1) explores the full idle-window range.
         self.action_space = spaces.Box(
-            low=self.idle_timeout_min,
-            high=self.idle_timeout_max,
+            low=-1.0,
+            high=1.0,
             shape=(n_services,),
             dtype=np.float32,
         )
@@ -167,15 +169,13 @@ class VahidiniaEnv(gym.Env):
     def step(self, action: np.ndarray):
         self._current_step += 1
 
-        # Apply continuous action: set idle_timeout per service
+        # Apply continuous action: scale [-1, 1] → [idle_timeout_min, idle_timeout_max]
         if self._autoscaling_api is not None:
             action = np.asarray(action, dtype=np.float32).flatten()
+            span = self.idle_timeout_max - self.idle_timeout_min
             for i, svc_id in enumerate(self._service_ids):
-                value = float(np.clip(
-                    action[i] if i < len(action) else action[-1],
-                    self.idle_timeout_min,
-                    self.idle_timeout_max,
-                ))
+                a = float(np.clip(action[i] if i < len(action) else action[-1], -1.0, 1.0))
+                value = self.idle_timeout_min + (a + 1.0) * 0.5 * span
                 self._autoscaling_api.set_idle_timeout(svc_id, value)
 
         # Advance simulation
