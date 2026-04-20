@@ -54,9 +54,11 @@ class WorkloadManager:
         if gen_type == "trace":
             from serverless_sim.workload.trace_generator import TraceReplayGenerator
             trace_path = workload_cfg["trace_path"]
+            scale = int(workload_cfg.get("scale", 1))
             generator = TraceReplayGenerator(trace_path, start_minute=start_minute,
                                              end_minute=end_minute,
-                                             column_map=column_map)
+                                             column_map=column_map,
+                                             scale=scale)
         elif gen_type == "aggregate_trace":
             from serverless_sim.workload.trace_generator import AggregateTraceGenerator
             trace_path = workload_cfg["trace_path"]

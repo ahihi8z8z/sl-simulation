@@ -76,11 +76,15 @@ class TraceReplayGenerator(BaseGenerator):
 
     def __init__(self, trace_path: str, start_minute: float | None = None,
                  end_minute: float | None = None,
-                 column_map: dict[str, str] | None = None):
+                 column_map: dict[str, str] | None = None,
+                 scale: int = 1):
+        if not isinstance(scale, int) or scale < 1:
+            raise ValueError(f"scale must be positive integer, got {scale!r}")
         self.ctx: SimContext | None = None
         self._request_counter = 0
         self._start_minute = start_minute
         self._end_minute = end_minute
+        self._scale = scale
         self._col = {**DEFAULT_TRACE_COLUMNS, **(column_map or {})}
         self._records: list[TraceRecord] = []
         self._load_trace(trace_path)
@@ -179,14 +183,13 @@ class TraceReplayGenerator(BaseGenerator):
                 )
                 return
 
-            inv = self._make_invocation(ctx, service)
-
-            ctx.logger.debug(
-                "t=%.3f | TRACE_ARRIVE | %s service=%s",
-                env.now, inv.request_id, service.service_id,
-            )
-
-            self._dispatch(ctx, inv)
+            for _ in range(self._scale):
+                inv = self._make_invocation(ctx, service)
+                ctx.logger.debug(
+                    "t=%.3f | TRACE_ARRIVE | %s service=%s",
+                    env.now, inv.request_id, service.service_id,
+                )
+                self._dispatch(ctx, inv)
 
     @property
     def record_count(self) -> int:
