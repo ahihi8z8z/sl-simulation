@@ -79,17 +79,15 @@ def load_and_fill(csv_path: str) -> pd.DataFrame:
     merged = full.merge(df, on="minute", how="left")
     merged["count"] = merged["count"].fillna(0).astype(float)
     merged["function_id"] = merged["function_id"].ffill().bfill()
-    merged["duration"] = merged["duration"].fillna(0.0)
     return merged
 
 
 def aggregate_hourly(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate minute-level data to hourly: sum count, mean duration."""
+    """Aggregate minute-level data to hourly: sum count."""
     df = df.copy()
     df["hour"] = df["minute"] // 60
     hourly = df.groupby("hour").agg(
         count=("count", "sum"),
-        duration=("duration", "mean"),
         function_id=("function_id", "first"),
     ).reset_index()
     return hourly
@@ -457,7 +455,7 @@ def process_csv(csv_path: str, output_dir: str, window: int, train_ratio: float,
         out.loc[train_start:train_end - 1, "predicted_count"] = train_pred
         out.loc[test_start:test_end - 1, "predicted_count"] = test_pred
 
-        out = out[["minute", "function_id", "count", "duration", "predicted_count", "phase"]]
+        out = out[["minute", "function_id", "count", "predicted_count", "phase"]]
     else:
         # Mark phases on all rows
         out.loc[:split_idx - 1, "phase"] = "train"
