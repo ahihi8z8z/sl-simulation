@@ -351,11 +351,6 @@ class LifecycleManager:
         invocation.execution_end_time = self.ctx.env.now
         invocation.completion_time = self.ctx.env.now
 
-        # Mark cold start on invocation
-        if instance.cold_start:
-            invocation.cold_start = True
-            instance.cold_start = False
-
         # If no more active requests, go back to warm and schedule idle check
         if instance.active_requests == 0:
             node = self.ctx.cluster_manager.get_node(instance.node_id)

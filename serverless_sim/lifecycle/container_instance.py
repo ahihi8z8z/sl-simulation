@@ -31,7 +31,6 @@ class ContainerInstance:
         # State tracking
         self.state: str = "null"
         self.target_state: Optional[str] = None
-        self.cold_start: bool = True  # True until first request completes
 
         # Timing
         self.created_at: float = env.now

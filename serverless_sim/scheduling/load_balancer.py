@@ -163,7 +163,11 @@ class BaseLoadBalancer:
 
     def _promote_and_execute(self, invocation: Invocation, node: Node,
                              instance: ContainerInstance):
-        """SimPy process: promote → acquire slot → execute → release."""
+        """SimPy process: promote → acquire slot → execute → release.
+
+        Hitting a pool-provisioned intermediate instance (e.g. prewarm) does
+        NOT count as a cold start — the pool already absorbed that cost.
+        """
         lm = self.ctx.lifecycle_manager
 
         promote_proc = lm.promote_instance(node, instance)
@@ -173,7 +177,7 @@ class BaseLoadBalancer:
         yield req
 
         lm.start_execution(instance, invocation)
-        invocation.cold_start = True
+        invocation.cold_start = False
         yield self.ctx.env.timeout(invocation.service_time)
 
         lm.finish_execution(instance, invocation)

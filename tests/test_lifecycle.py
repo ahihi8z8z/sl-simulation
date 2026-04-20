@@ -101,7 +101,6 @@ class TestContainerInstance:
         assert inst.state == "null"
         assert inst.is_idle
         assert inst.available_slots == 4
-        assert inst.cold_start is True
 
 
 class TestLifecycleEndToEnd:
