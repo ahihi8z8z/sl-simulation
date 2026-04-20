@@ -63,19 +63,20 @@ class BaseLoadBalancer:
             self._drop(invocation, "unknown_service")
             return False
 
-        # 1. Find reusable warm/running instance with free slot
+        # 1+2. Single-scan: prefer reusable on any node; else first promotable seen
+        first_promotable_node: Node | None = None
+        first_promotable: ContainerInstance | None = None
         for node in nodes:
-            instance = lm.find_reusable_instance(node, service_id)
-            if instance is not None:
-                self._dispatch_to_instance(invocation, node, instance)
+            reusable, promotable = lm.find_reusable_or_promotable(node, service_id)
+            if reusable is not None:
+                self._dispatch_to_instance(invocation, node, reusable)
                 return True
-
-        # 2. Find promotable intermediate instance
-        for node in nodes:
-            promotable = lm.find_promotable_instance(node, service_id)
-            if promotable is not None:
-                self._dispatch_promote(invocation, node, promotable)
-                return True
+            if promotable is not None and first_promotable is None:
+                first_promotable_node = node
+                first_promotable = promotable
+        if first_promotable is not None:
+            self._dispatch_promote(invocation, first_promotable_node, first_promotable)
+            return True
 
         # 3. Check max_instances
         if self.ctx.autoscaling_manager:
@@ -141,18 +142,14 @@ class BaseLoadBalancer:
 
     def _execute(self, invocation: Invocation, node: Node,
                  instance: ContainerInstance):
-        """SimPy process: acquire slot → execute → release."""
+        """SimPy process: execute on pre-claimed slot."""
         lm = self.ctx.lifecycle_manager
-
-        req = instance.slots.request()
-        yield req
 
         lm.start_execution(instance, invocation)
         invocation.cold_start = False
         yield self.ctx.env.timeout(invocation.service_time)
 
         lm.finish_execution(instance, invocation)
-        instance.slots.release(req)
 
         invocation.status = "completed"
         self.ctx.request_table.finalize(invocation)
@@ -163,7 +160,7 @@ class BaseLoadBalancer:
 
     def _promote_and_execute(self, invocation: Invocation, node: Node,
                              instance: ContainerInstance):
-        """SimPy process: promote → acquire slot → execute → release.
+        """SimPy process: promote → execute on pre-claimed slot.
 
         Hitting a pool-provisioned intermediate instance (e.g. prewarm) does
         NOT count as a cold start — the pool already absorbed that cost.
@@ -173,15 +170,11 @@ class BaseLoadBalancer:
         promote_proc = lm.promote_instance(node, instance)
         instance = yield promote_proc
 
-        req = instance.slots.request()
-        yield req
-
         lm.start_execution(instance, invocation)
         invocation.cold_start = False
         yield self.ctx.env.timeout(invocation.service_time)
 
         lm.finish_execution(instance, invocation)
-        instance.slots.release(req)
 
         invocation.status = "completed"
         self.ctx.request_table.finalize(invocation)
@@ -197,15 +190,11 @@ class BaseLoadBalancer:
         cold_start_proc = lm.prepare_instance_for_service(node, invocation.service_id)
         instance = yield cold_start_proc
 
-        req = instance.slots.request()
-        yield req
-
         lm.start_execution(instance, invocation)
         invocation.cold_start = True
         yield self.ctx.env.timeout(invocation.service_time)
 
         lm.finish_execution(instance, invocation)
-        instance.slots.release(req)
 
         invocation.status = "completed"
         self.ctx.request_table.finalize(invocation)

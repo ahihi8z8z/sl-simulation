@@ -10,7 +10,7 @@ _id_counter = itertools.count(1)
 
 
 class ContainerInstance:
-    """Container instance with simpy.Resource for concurrency slots."""
+    """Container instance. Concurrency is enforced synchronously via active_requests."""
 
     def __init__(
         self,
@@ -24,9 +24,6 @@ class ContainerInstance:
         self.service_id: str = service_id
         self.node_id: str = node_id
         self.max_concurrency: int = max_concurrency
-
-        # SimPy resource for concurrency control
-        self.slots: simpy.Resource = simpy.Resource(env, capacity=max_concurrency)
 
         # State tracking
         self.state: str = "null"
@@ -67,7 +64,7 @@ class ContainerInstance:
 
     @property
     def available_slots(self) -> int:
-        return self.max_concurrency - self.slots.count
+        return self.max_concurrency - self.active_requests
 
     def __repr__(self) -> str:
         pool = f", pool={self.pool_state}" if self.pool_state else ""

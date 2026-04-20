@@ -60,30 +60,36 @@ class Node:
     def allocate(self, request: ResourceProfile) -> bool:
         """Try to allocate resources. Returns True on success."""
         if not self._reserved_applied and (self.reserved.cpu > 0 or self.reserved.memory > 0):
-            self.available = self.available.subtract(self.reserved)
+            self.available.cpu -= self.reserved.cpu
+            self.available.memory -= self.reserved.memory
             self._reserved_applied = True
-        if not self.available.can_fit(request):
+        if self.available.cpu < request.cpu or self.available.memory < request.memory:
             return False
-        self.allocated = self.allocated.add(request)
-        self.available = self.available.subtract(request)
+        self.allocated.cpu += request.cpu
+        self.allocated.memory += request.memory
+        self.available.cpu -= request.cpu
+        self.available.memory -= request.memory
         return True
 
     def release(self, request: ResourceProfile) -> None:
         """Release previously allocated resources."""
-        self.allocated = self.allocated.subtract(request)
-        self.available = self.available.add(request)
-        self.allocated = ResourceProfile(
-            cpu=max(0.0, self.allocated.cpu),
-            memory=max(0.0, self.allocated.memory),
-        )
+        self.allocated.cpu -= request.cpu
+        self.allocated.memory -= request.memory
+        self.available.cpu += request.cpu
+        self.available.memory += request.memory
+        if self.allocated.cpu < 0.0:
+            self.allocated.cpu = 0.0
+        if self.allocated.memory < 0.0:
+            self.allocated.memory = 0.0
         max_avail_cpu = self.capacity.cpu - (self.reserved.cpu if self._reserved_applied else 0.0)
         max_avail_mem = self.capacity.memory - (self.reserved.memory if self._reserved_applied else 0.0)
-        self.available = ResourceProfile(
-            cpu=min(max_avail_cpu, self.available.cpu),
-            memory=min(max_avail_mem, self.available.memory),
-        )
+        if self.available.cpu > max_avail_cpu:
+            self.available.cpu = max_avail_cpu
+        if self.available.memory > max_avail_mem:
+            self.available.memory = max_avail_mem
         if self._reserved_applied and self.allocated.cpu <= 0 and self.allocated.memory <= 0:
-            self.available = self.available.add(self.reserved)
+            self.available.cpu += self.reserved.cpu
+            self.available.memory += self.reserved.memory
             self._reserved_applied = False
 
     def can_fit(self, request: ResourceProfile) -> bool:
