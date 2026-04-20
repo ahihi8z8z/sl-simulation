@@ -14,6 +14,16 @@ dependencies = [
     "rich",
 ]
 
+[project.optional-dependencies]
+tools = [
+    "pandas",
+    "matplotlib",
+    "torch",
+]
+dev = [
+    "pytest",
+]
+
 [tool.setuptools.packages.find]
 include = ["serverless_sim*", "gym_env*", "rl_agent*"]
 
