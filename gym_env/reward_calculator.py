@@ -2,15 +2,16 @@ from __future__ import annotations
 
 
 class RewardCalculator:
-    """Computes reward from ratios and resource utilization metrics.
+    """Computes reward from raw counts and resource utilization metrics.
 
-    Reward = -w_drop * drop_ratio
-           - w_cold * cold_start_ratio
+    Reward = -w_drop * d_dropped
+           - w_cold * d_cold
            - w_mem  * mem_utilization
            - w_cpu  * cpu_utilization
+           - w_lat  * (step_latency_mean / 2.5)
 
-    All weights positive. All components in [0, 1].
-    mem/cpu_utilization = avg resource used / total cluster capacity.
+    All weights positive. d_dropped, d_cold are raw counts per step.
+    mem/cpu_utilization = avg resource used / total cluster capacity, in [0, 1].
     """
 
     def __init__(
@@ -28,8 +29,6 @@ class RewardCalculator:
         memory_efficiency_reward: float = 0.0,
         cpu_efficiency_reward: float = 0.0,
         latency_penalty: float = 0.0,
-        cold_start_normalize: float = 0.0,
-        drop_normalize: float = 0.0,
         resource_penalty: float = 0.0,
         throughput_reward: float = 0.0,
     ):
@@ -38,8 +37,6 @@ class RewardCalculator:
         self.mem_utilization_penalty = abs(mem_utilization_penalty)
         self.cpu_utilization_penalty = abs(cpu_utilization_penalty)
         self.latency_penalty = abs(latency_penalty)
-        self.cold_start_normalize = cold_start_normalize  # 0 = ratio mode, >0 = fixed denominator
-        self.drop_normalize = drop_normalize
         self.step_duration = step_duration
         self.cluster_memory = cluster_memory
         self.cluster_cpu = cluster_cpu
@@ -92,12 +89,6 @@ class RewardCalculator:
         self._prev_total_mem_sec = total_mem_sec
         self._prev_total_cpu_sec = total_cpu_sec
 
-        # Ratios (0 = good, 1 = bad)
-        cold_denom = self.cold_start_normalize if self.cold_start_normalize > 0 else max(d_total, 1.0)
-        drop_denom = self.drop_normalize if self.drop_normalize > 0 else max(d_total, 1.0)
-        drop_ratio = d_dropped / drop_denom
-        cold_ratio = d_cold / cold_denom
-
         # Resource utilization (0 = idle, 1 = full cluster)
         max_mem_sec = self.step_duration * self.cluster_memory
         max_cpu_sec = self.step_duration * self.cluster_cpu
@@ -109,16 +100,14 @@ class RewardCalculator:
         cpu_per_req = (d_total_cpu / d_completed) if d_completed > 0 else 0.0
 
         reward = (
-            - self.drop_penalty * drop_ratio
-            - self.cold_start_penalty * cold_ratio
+            - self.drop_penalty * d_dropped
+            - self.cold_start_penalty * d_cold
             - self.mem_utilization_penalty * mem_util
             - self.cpu_utilization_penalty * cpu_util
             - self.latency_penalty * (step_latency_mean / 2.5)
         )
 
         self.last_components = {
-            "drop_ratio": drop_ratio,
-            "cold_start_ratio": cold_ratio,
             "mem_utilization": mem_util,
             "cpu_utilization": cpu_util,
             "latency_mean": step_latency_mean,
