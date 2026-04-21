@@ -175,9 +175,15 @@ def build_gym_config(experiment: dict, data: dict) -> dict | None:
     defaults = data.get("gym_defaults", {})
     config = copy.deepcopy(defaults)
 
-    # Apply experiment-specific gym overrides
+    # Apply experiment-specific gym overrides with DEEP merge — so partial
+    # nested overrides (e.g. reward.mem_penalty only) don't wipe the other
+    # keys defined in defaults (drop_penalty, cold_penalty, ...).
     gym_overrides = experiment.get("gym", {})
-    config.update(gym_overrides)
+    for key, value in gym_overrides.items():
+        if (isinstance(value, dict) and isinstance(config.get(key), dict)):
+            config[key] = {**config[key], **value}
+        else:
+            config[key] = value
 
     # Update observation_metrics if pool_states changed
     # (remove metrics for states not in pool_states)
