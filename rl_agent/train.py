@@ -199,8 +199,11 @@ def run_training(
         if isinstance(vec_env, VecNormalize) and os.path.exists(vec_norm_path):
             vec_env = VecNormalize.load(vec_norm_path, vec_env.venv)
             print(f"VecNormalize restored from {vec_norm_path}")
+        # SB3 requires exact match of stored policy_kwargs, so drop it on load —
+        # the architecture is already baked into the saved model.
         model = algo_cls.load(resume_path, env=vec_env, **{
-            k: v for k, v in model_kwargs.items() if k not in ("policy", "env")
+            k: v for k, v in model_kwargs.items()
+            if k not in ("policy", "env", "policy_kwargs")
         })
         print(f"Resumed from {resume_path}")
     else:
