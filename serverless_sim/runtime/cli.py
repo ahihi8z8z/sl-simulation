@@ -57,3 +57,7 @@ def main():
     elif args.command == "infer":
         from serverless_sim.runtime.app import run_infer
         run_infer(args)
+
+
+if __name__ == "__main__":
+    main()
