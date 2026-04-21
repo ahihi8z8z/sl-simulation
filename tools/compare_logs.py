@@ -48,53 +48,44 @@ def load_log(log_dir: str) -> dict:
 
 
 def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> None:
-    """Grouped bar chart — groups are metrics, bars are runs.
-
-    Cold start and memory utilization share a % axis; power is on its own axis (W).
-    """
-    pct_metrics = {"Cold Start %": [], "Drop %": [], "Avg Mem Util %": []}
-    power_metrics = {"Avg Power (W)": []}
+    """2x2 subplot: cold starts (count), dropped (count), avg mem util (%), avg power (W)."""
+    panels = [
+        ("Cold Starts (requests)", "count", "%.0f"),
+        ("Dropped (requests)", "count", "%.0f"),
+        ("Avg Mem Util (%)", "pct", "%.1f"),
+        ("Avg Power (W)", "watt", "%.1f"),
+    ]
+    values_by_panel = {name: [] for name, _, _ in panels}
 
     for log in logs:
         s = log.get("summary", {})
         r = s.get("requests", {})
         cu = s.get("cluster_utilization", {})
-        total = max(r.get("total", 1), 1)
-        completed = max(r.get("completed", 1), 1)
-        pct_metrics["Cold Start %"].append(r.get("cold_starts", 0) / completed * 100)
-        pct_metrics["Drop %"].append(r.get("dropped", 0) / total * 100)
-        pct_metrics["Avg Mem Util %"].append(cu.get("avg_memory_utilization", 0) * 100)
+        values_by_panel["Cold Starts (requests)"].append(r.get("cold_starts", 0))
+        values_by_panel["Dropped (requests)"].append(r.get("dropped", 0))
+        values_by_panel["Avg Mem Util (%)"].append(cu.get("avg_memory_utilization", 0) * 100)
 
         metrics_csv = log.get("metrics")
         if metrics_csv is not None and "cluster.power" in metrics_csv.columns:
-            power_metrics["Avg Power (W)"].append(metrics_csv["cluster.power"].mean())
+            values_by_panel["Avg Power (W)"].append(metrics_csv["cluster.power"].mean())
         else:
-            power_metrics["Avg Power (W)"].append(0)
+            values_by_panel["Avg Power (W)"].append(0)
 
     n_runs = len(labels)
-    fig, (ax_pct, ax_pow) = plt.subplots(
-        1, 2, figsize=(max(12, n_runs * 3), 5),
-        gridspec_kw={"width_ratios": [2, 1]},
-    )
+    fig, axes = plt.subplots(2, 2, figsize=(max(10, n_runs * 1.5 + 6), 8))
+    colors = [COLORS[i % len(COLORS)] for i in range(n_runs)]
+    x = np.arange(n_runs)
 
-    for ax, data in ((ax_pct, pct_metrics), (ax_pow, power_metrics)):
-        metric_names = list(data.keys())
-        x = np.arange(len(metric_names))
-        width = 0.8 / n_runs
-        for i, (label, color) in enumerate(zip(labels, COLORS)):
-            values = [data[m][i] for m in metric_names]
-            offset = (i - n_runs / 2 + 0.5) * width
-            bars = ax.bar(x + offset, values, width, label=label, color=color, alpha=0.85)
-            ax.bar_label(bars, fmt="%.1f", fontsize=7, label_type="center")
+    for ax, (name, _, fmt) in zip(axes.flatten(), panels):
+        values = values_by_panel[name]
+        bars = ax.bar(x, values, width=0.7, color=colors, alpha=0.85)
+        ax.bar_label(bars, fmt=fmt, fontsize=8, label_type="edge")
+        ax.set_title(name, fontsize=11)
         ax.set_xticks(x)
-        ax.set_xticklabels(metric_names)
+        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
         ax.grid(axis="y", alpha=0.3)
 
-    ax_pct.set_ylabel("%")
-    ax_pow.set_ylabel("Watts")
-    ax_pct.legend(fontsize=8)
-    fig.suptitle("Performance Metrics Comparison")
-
+    fig.suptitle("Performance Metrics Comparison", fontsize=13)
     plt.tight_layout()
     fig.savefig(os.path.join(output_dir, "comparison_metrics.png"), dpi=150)
     plt.close(fig)
