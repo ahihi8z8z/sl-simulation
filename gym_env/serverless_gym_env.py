@@ -106,18 +106,8 @@ class ServerlessGymEnv(gym.Env):
             idle_timeout_max=self.gym_config.get("idle_timeout_max", 120.0),
         )
 
-        # Reward calculator — compute cluster totals for utilization
-        nodes = ctx.cluster_manager.get_enabled_nodes()
-        cluster_memory = sum(n.capacity.memory for n in nodes)
-        cluster_cpu = sum(n.capacity.cpu for n in nodes)
-
         reward_cfg = self.gym_config.get("reward", {})
-        self._reward_calc = RewardCalculator(
-            step_duration=self.step_duration,
-            cluster_memory=cluster_memory,
-            cluster_cpu=cluster_cpu,
-            **reward_cfg,
-        )
+        self._reward_calc = RewardCalculator(**reward_cfg)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
