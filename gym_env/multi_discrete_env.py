@@ -84,29 +84,13 @@ class MultiDiscreteEnv(gym.Env):
 
         # Action space
         if self.continuous_action:
-            # Normalized Box(-1, 1) per dimension; scaled to physical range inside step()
-            # so the Gaussian policy (init std=1) explores the full range.
-            lows = []
-            highs = []
-            dm = self._action_mapper.delta_max
-            for svc_id, action_type, state in self._action_mapper._action_map:
-                if action_type == "pool_target":
-                    if dm > 0:
-                        lows.append(float(-dm))
-                        highs.append(float(dm))
-                    else:
-                        lows.append(0.0)
-                        highs.append(float(self._action_mapper.pool_target_max))
-                else:
-                    lows.append(0.0)
-                    highs.append(float(self._action_mapper.idle_timeout_max_minutes * 60))
-            self._action_low = np.array(lows, dtype=np.float32)
-            self._action_high = np.array(highs, dtype=np.float32)
-            n = len(lows)
+            # Softmax layout: mapper.n_dims = sum_svc(1 + N_pool_states + 1).
+            # Box(-1, 1) — all scaling (total, logits→softmax, idle_timeout)
+            # happens in mapper._apply_softmax.
             self.action_space = spaces.Box(
                 low=-1.0,
                 high=1.0,
-                shape=(n,),
+                shape=(self._action_mapper.n_dims,),
                 dtype=np.float32,
             )
         elif self.flatten_action:
@@ -162,6 +146,7 @@ class MultiDiscreteEnv(gym.Env):
             pool_target_max=self.gym_config.get("pool_target_max", 10),
             idle_timeout_max_minutes=self.gym_config.get("idle_timeout_max_minutes", 10),
             delta_max=self.gym_config.get("delta_max", 0),
+            softmax=self.continuous_action,
         )
 
         reward_cfg = self.gym_config.get("reward", {})
@@ -187,10 +172,7 @@ class MultiDiscreteEnv(gym.Env):
         self._current_step += 1
 
         if self._autoscaling_api:
-            if self.continuous_action:
-                a = np.clip(np.asarray(action, dtype=np.float32).flatten(), -1.0, 1.0)
-                action = self._action_low + (a + 1.0) * 0.5 * (self._action_high - self._action_low)
-            self._action_mapper.apply(action, self._autoscaling_api, continuous=self.continuous_action)
+            self._action_mapper.apply(action, self._autoscaling_api)
 
         ctx = self._engine.ctx
         ctx.env.run(until=ctx.env.now + self.step_duration)
