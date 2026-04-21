@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 
-import numpy as np
 from stable_baselines3 import PPO, A2C, DQN, SAC
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.monitor import Monitor
@@ -52,42 +51,17 @@ class _SaveVecNormOnBest(BaseCallback):
 
 
 class RewardComponentLogger(BaseCallback):
-    """Logs reward components to TensorBoard.
-
-    Works for both on-policy (PPO/A2C) and off-policy (DQN):
-    - On-policy: logs mean at rollout end
-    - Off-policy: logs mean every log_interval steps (default 100)
-    """
-
-    def __init__(self, log_interval: int = 100, verbose=0):
-        super().__init__(verbose)
-        self._buffer: dict[str, list[float]] = {}
-        self._log_interval = log_interval
+    """Log reward components via logger.record_mean() — accumulated across
+    all steps between SB3 dumps, then reset. No manual buffer/flush needed."""
 
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
         for info in infos:
             rc = info.get("reward_components")
             if rc and rc.get("d_total", 0) > 0:
-                # Only buffer steps with actual traffic
                 for key, val in rc.items():
-                    self._buffer.setdefault(key, []).append(val)
-
-        # For off-policy: flush every log_interval steps
-        if self.num_timesteps % self._log_interval == 0 and self._buffer:
-            self._flush()
-
+                    self.logger.record_mean(f"reward/{key}", float(val))
         return True
-
-    def _on_rollout_end(self) -> None:
-        """Called by on-policy algorithms at end of rollout."""
-        if self._buffer:
-            self._flush()
-
-    def _flush(self) -> None:
-        for key, vals in self._buffer.items():
-            self.logger.record(f"reward/{key}", np.mean(vals))
-        self._buffer.clear()
 
 
 ALGORITHMS = {"ppo": PPO, "a2c": A2C, "dqn": DQN, "sac": SAC, "maskable_ppo": MaskablePPO, "recurrent_ppo": RecurrentPPO}
