@@ -150,7 +150,7 @@ class MultiDiscreteEnv(gym.Env):
         )
 
         reward_cfg = self.gym_config.get("reward", {})
-        self._reward_calc = RewardCalculator(**reward_cfg)
+        self._reward_calc = RewardCalculator(step_duration=self.step_duration, **reward_cfg)
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)

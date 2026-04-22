@@ -62,9 +62,11 @@ class ClusterCollector(BaseCollector):
 
         metrics["cluster.cpu_used"] = used_cpu
         metrics["cluster.cpu_used_running"] = running_cpu
+        metrics["cluster.cpu_capacity"] = total_cpu
         metrics["cluster.cpu_utilization"] = used_cpu / total_cpu if total_cpu > 0 else 0.0
         metrics["cluster.memory_used"] = used_mem
         metrics["cluster.memory_used_running"] = running_mem
+        metrics["cluster.memory_capacity"] = total_mem
         metrics["cluster.memory_utilization"] = used_mem / total_mem if total_mem > 0 else 0.0
 
         # Flavor resource tracking
