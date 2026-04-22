@@ -26,8 +26,6 @@ CUMULATIVE_METRICS = {
     "lifecycle.instances_evicted",
     "lifecycle.total_cpu_seconds",
     "lifecycle.total_memory_seconds",
-    "lifecycle.running_cpu_seconds",
-    "lifecycle.running_memory_seconds",
 }
 
 # Computed virtual metrics — derived from deltas of other metrics
@@ -37,17 +35,20 @@ COMPUTED_METRICS = {
     "computed.cold_start_ratio": ("request.cold_starts", "request.total", 0.0),
     # drop_ratio = d(dropped) / d(total)
     "computed.drop_ratio": ("request.dropped", "request.total", 0.0),
-    # memory_efficiency = d(running_memory_seconds) / d(total_memory_seconds)
-    "computed.memory_efficiency": (
-        "lifecycle.running_memory_seconds",
+}
+
+# Time-averaged utilization over the step:
+# d(total_{cpu,memory}_seconds) / (cluster.{cpu,memory}_capacity * step_duration).
+# Handled separately because the denominator mixes an instantaneous
+# capacity reading with a constant, not a cumulative delta.
+UTILIZATION_STEP_METRICS = {
+    "computed.memory_utilization_step": (
         "lifecycle.total_memory_seconds",
-        0.0,
+        "cluster.memory_capacity",
     ),
-    # cpu_efficiency = d(running_cpu_seconds) / d(total_cpu_seconds)
-    "computed.cpu_efficiency": (
-        "lifecycle.running_cpu_seconds",
+    "computed.cpu_utilization_step": (
         "lifecycle.total_cpu_seconds",
-        0.0,
+        "cluster.cpu_capacity",
     ),
 }
 
@@ -58,10 +59,10 @@ class ObservationBuilder:
     Features:
     - Cumulative metrics auto-converted to per-step deltas
     - Computed virtual metrics (ratios derived from deltas):
-        computed.cold_start_ratio  = d(cold_starts) / d(total)
-        computed.drop_ratio        = d(dropped) / d(total)
-        computed.memory_efficiency = d(running_mem_sec) / d(total_mem_sec)
-        computed.cpu_efficiency    = d(running_cpu_sec) / d(total_cpu_sec)
+        computed.cold_start_ratio        = d(cold_starts) / d(total)
+        computed.drop_ratio              = d(dropped) / d(total)
+        computed.memory_utilization_step = d(total_mem_sec) / (cluster_mem * step_duration)
+        computed.cpu_utilization_step    = d(total_cpu_sec) / (cluster_cpu * step_duration)
     """
 
     def __init__(self, metric_names: list[str] | None = None,
@@ -77,11 +78,13 @@ class ObservationBuilder:
         for name in self.metric_names:
             if name in CUMULATIVE_METRICS:
                 self._tracked_cumulative.add(name)
-            elif name.startswith("computed."):
-                spec = COMPUTED_METRICS.get(name)
-                if spec:
-                    self._tracked_cumulative.add(spec[0])
-                    self._tracked_cumulative.add(spec[1])
+            elif name in COMPUTED_METRICS:
+                spec = COMPUTED_METRICS[name]
+                self._tracked_cumulative.add(spec[0])
+                self._tracked_cumulative.add(spec[1])
+            elif name in UTILIZATION_STEP_METRICS:
+                num, _ = UTILIZATION_STEP_METRICS[name]
+                self._tracked_cumulative.add(num)
             elif name in ("computed.avg_inter_arrival_time", "computed.request_rate"):
                 self._tracked_cumulative.add("request.total")
 
@@ -109,14 +112,17 @@ class ObservationBuilder:
             elif name == "computed.request_rate":
                 d_total = deltas.get("request.total", 0.0)
                 obs[i] = d_total / self.step_duration
-            elif name.startswith("computed."):
-                spec = COMPUTED_METRICS.get(name)
-                if spec:
-                    num = deltas.get(spec[0], 0.0)
-                    den = deltas.get(spec[1], 0.0)
-                    obs[i] = (num / den) if den > 0 else spec[2]
-                else:
-                    obs[i] = 0.0
+            elif name in UTILIZATION_STEP_METRICS:
+                num_key, cap_key = UTILIZATION_STEP_METRICS[name]
+                d_num = deltas.get(num_key, 0.0)
+                capacity = float(snapshot.get(cap_key, 0.0))
+                max_possible = capacity * self.step_duration
+                obs[i] = (d_num / max_possible) if max_possible > 0 else 0.0
+            elif name in COMPUTED_METRICS:
+                spec = COMPUTED_METRICS[name]
+                num = deltas.get(spec[0], 0.0)
+                den = deltas.get(spec[1], 0.0)
+                obs[i] = (num / den) if den > 0 else spec[2]
             else:
                 obs[i] = float(snapshot.get(name, 0.0))
         return obs
