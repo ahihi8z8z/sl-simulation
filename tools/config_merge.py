@@ -185,20 +185,4 @@ def build_gym_config(experiment: dict, data: dict) -> dict | None:
         else:
             config[key] = value
 
-    # Update observation_metrics if pool_states changed
-    # (remove metrics for states not in pool_states)
-    if "pool_states" in gym_overrides and "observation_metrics" not in gym_overrides:
-        pool_states = gym_overrides["pool_states"]
-        filtered = []
-        for m in config.get("observation_metrics", []):
-            # Keep metric if it's not pool_target-specific, or if its state is in pool_states
-            if "pool_target." not in m:
-                filtered.append(m)
-            else:
-                for state in pool_states:
-                    if f"pool_target.{state}" in m:
-                        filtered.append(m)
-                        break
-        config["observation_metrics"] = filtered
-
     return config
