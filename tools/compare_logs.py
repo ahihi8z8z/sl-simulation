@@ -79,7 +79,7 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
             n_completed = len(completed)
             if len(cold) > 0 and n_completed > 0:
                 lat_sum = (cold["execution_start_time"] - cold["arrival_time"]).sum()
-                cold_lat.append(lat_sum / n_completed)
+                cold_lat.append(lat_sum / n_completed * 1000.0)
             else:
                 cold_lat.append(0)
         else:
@@ -117,7 +117,7 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
 
     # Remaining panels: single bar, no error bars
     for ax, values, title, fmt in [
-        (axes[0, 1], cold_lat, "Cold Latency per Served Request (s)", "%.2f"),
+        (axes[0, 1], cold_lat, "Cold Latency per Served Request (ms)", "%.1f"),
         (axes[1, 0], ram_per_req, "RAM per request", "%.1f"),
         (axes[1, 1], power, "Avg Power (W)", "%.1f"),
     ]:
