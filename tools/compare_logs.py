@@ -7,6 +7,8 @@ Generates:
                                  per run, shared top legend
   3. comparison_pool_targets.png — pool_target lines (prewarm/warm) + idle
                                    window on twin axis, shared top legend
+  4. comparison_latency_cdf.png — latency CDF per run (completed requests
+                                   with latency > 0)
 Usage:
     python tools/compare_logs.py logs/infer_our_sac_llm_9b logs/infer_our_sac_prewarm_llm_9b
     python tools/compare_logs.py logs/infer_* --labels "SAC,SAC-prewarm,SAC-warm"
@@ -275,6 +277,39 @@ def plot_pool_targets(logs: list[dict], labels: list[str], output_dir: str) -> N
     print(f"  Saved: comparison_pool_targets.png")
 
 
+def plot_latency_cdf(logs: list[dict], labels: list[str], output_dir: str) -> None:
+    """CDF of request latency per run. Includes only completed requests
+    with latency > 0 (matches the 'Avg Latency' panel's filter)."""
+    fig, ax = plt.subplots(figsize=(9, 5))
+    colors = [COLORS[i % len(COLORS)] for i in range(len(labels))]
+
+    for log, label, color in zip(logs, labels, colors):
+        trace = log.get("trace")
+        if trace is None or len(trace) == 0:
+            continue
+        completed = trace[trace["status"] == "completed"]
+        latencies = (completed["execution_start_time"] - completed["arrival_time"]) * 1000.0
+        latencies = latencies[latencies > 0].to_numpy()
+        if len(latencies) == 0:
+            continue
+        sorted_lat = np.sort(latencies)
+        cdf = np.arange(1, len(sorted_lat) + 1) / len(sorted_lat)
+        ax.plot(sorted_lat, cdf, color=color, linewidth=1.5,
+                label=f"{label} (n={len(sorted_lat)})")
+
+    ax.set_xlabel("Latency (ms)")
+    ax.set_ylabel("CDF")
+    ax.set_title("Distribution of Cold Start Latency")
+    ax.set_ylim(0, 1.02)
+    ax.grid(alpha=0.3)
+    ax.legend(fontsize=9, loc="lower right")
+
+    plt.tight_layout()
+    fig.savefig(os.path.join(output_dir, "comparison_latency_cdf.png"), dpi=150)
+    plt.close(fig)
+    print(f"  Saved: comparison_latency_cdf.png")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Compare simulation logs")
     parser.add_argument("log_dirs", nargs="+", help="Log directories to compare")
@@ -292,6 +327,7 @@ def main():
     plot_metrics_bar(logs, labels, args.output_dir)
     plot_container_comparison(logs, labels, args.output_dir, smooth=args.smooth)
     plot_pool_targets(logs, labels, args.output_dir)
+    plot_latency_cdf(logs, labels, args.output_dir)
     print(f"\nAll plots in {args.output_dir}/")
 
 
