@@ -1,8 +1,8 @@
 """Compare simulation logs across multiple runs.
 
 Generates:
-  1. comparison_metrics.png    — 2x2: cold+drop grouped bar, cold-start
-                                 latency, RAM per request, avg power
+  1. comparison_metrics.png    — 2x2: cold+drop grouped bar, avg latency
+                                 (latency > 0), RAM per request, avg power
   2. comparison_containers.png — stacked instances (prewarm/warm/running)
                                  per run, shared top legend
   3. comparison_pool_targets.png — pool_target lines (prewarm/warm) + idle
@@ -52,13 +52,13 @@ def load_log(log_dir: str) -> dict:
 def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> None:
     """2x2 subplot:
        (0,0) cold-starts & drops — grouped bar, one group per algorithm
-       (0,1) cold-start latency (s)
+       (0,1) avg latency (ms) over completed requests with latency > 0
        (1,0) RAM per request (mem cost as % of cluster memory-seconds)
        (1,1) avg power (W)
     """
     cold_starts: list[float] = []
     drops: list[float] = []
-    cold_lat: list[float] = []
+    avg_lat: list[float] = []
     ram_per_req: list[float] = []
     power: list[float] = []
 
@@ -75,15 +75,14 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
         trace = log.get("trace")
         if trace is not None and len(trace) > 0:
             completed = trace[trace["status"] == "completed"]
-            cold = completed[completed["cold_start"] == True]
-            n_completed = len(completed)
-            if len(cold) > 0 and n_completed > 0:
-                lat_sum = (cold["execution_start_time"] - cold["arrival_time"]).sum()
-                cold_lat.append(lat_sum / n_completed * 1000.0)
+            latencies = completed["execution_start_time"] - completed["arrival_time"]
+            positive = latencies[latencies > 0]
+            if len(positive) > 0:
+                avg_lat.append(positive.mean() * 1000.0)
             else:
-                cold_lat.append(0)
+                avg_lat.append(0)
         else:
-            cold_lat.append(0)
+            avg_lat.append(0)
 
         total_mem_sec = eff.get("total_memory_seconds", 0)
         cluster_mem_sec = sim.get("sim_end_time", 1) * cu.get("memory_total", 1)
@@ -117,7 +116,7 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
 
     # Remaining panels: single bar, no error bars
     for ax, values, title, fmt in [
-        (axes[0, 1], cold_lat, "Cold Latency per Served Request (ms)", "%.1f"),
+        (axes[0, 1], avg_lat, "Avg Latency (ms)", "%.1f"),
         (axes[1, 0], ram_per_req, "RAM per request", "%.1f"),
         (axes[1, 1], power, "Avg Power (W)", "%.1f"),
     ]:
