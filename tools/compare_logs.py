@@ -99,25 +99,32 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
     colors = [COLORS[i % len(COLORS)] for i in range(n_runs)]
     x = np.arange(n_runs)
 
-    # (0,0) grouped bar: cold starts vs drops
+    # (0,0) grouped bar: cold starts vs drops. Same color per run as other
+    # panels; distinguish cold vs drop by hatch pattern.
     ax = axes[0, 0]
     w = 0.38
-    bars_c = ax.bar(x - w / 2, cold_starts, w, label="Cold Starts",
-                    color="#F44336", alpha=0.85)
-    bars_d = ax.bar(x + w / 2, drops, w, label="Dropped",
-                    color="#2196F3", alpha=0.85)
+    bars_c = ax.bar(x - w / 2, cold_starts, w, color=colors, alpha=0.85,
+                    edgecolor="black", linewidth=0.5, hatch="\\")
+    bars_d = ax.bar(x + w / 2, drops, w, color=colors, alpha=0.85,
+                    edgecolor="black", linewidth=0.5, hatch="/")
     ax.bar_label(bars_c, fmt="%.0f", fontsize=7)
     ax.bar_label(bars_d, fmt="%.0f", fontsize=7)
     ax.set_title("Cold Starts & Dropped (requests)", fontsize=11)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
-    ax.legend(fontsize=8)
+    # Legend by hatch style, color-neutral
+    from matplotlib.patches import Patch
+    legend_handles = [
+        Patch(facecolor="lightgray", edgecolor="black", hatch="\\", label="Cold Starts"),
+        Patch(facecolor="lightgray", edgecolor="black", hatch="/", label="Dropped"),
+    ]
+    ax.legend(handles=legend_handles, fontsize=8)
     ax.grid(axis="y", alpha=0.3)
 
     # Remaining panels: single bar, no error bars
     for ax, values, title, fmt in [
         (axes[0, 1], avg_lat, "Avg Latency (ms)", "%.1f"),
-        (axes[1, 0], ram_per_req, "RAM per request", "%.1f"),
+        (axes[1, 0], ram_per_req, "RAM per request (MB)", "%.1f"),
         (axes[1, 1], power, "Avg Power (W)", "%.1f"),
     ]:
         bars = ax.bar(x, values, width=0.7, color=colors, alpha=0.85)
