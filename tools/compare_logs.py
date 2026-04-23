@@ -7,8 +7,6 @@ Generates:
                                  per run, shared top legend
   3. comparison_pool_targets.png — pool_target lines (prewarm/warm) + idle
                                    window on twin axis, shared top legend
-  4. comparison_latency_cdf.png  — CDF of cold-start latency
-
 Usage:
     python tools/compare_logs.py logs/infer_our_sac_llm_9b logs/infer_our_sac_prewarm_llm_9b
     python tools/compare_logs.py logs/infer_* --labels "SAC,SAC-prewarm,SAC-warm"
@@ -78,9 +76,10 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
         if trace is not None and len(trace) > 0:
             completed = trace[trace["status"] == "completed"]
             cold = completed[completed["cold_start"] == True]
-            if len(cold) > 0:
-                lat = cold["execution_start_time"] - cold["arrival_time"]
-                cold_lat.append(lat.mean())
+            n_completed = len(completed)
+            if len(cold) > 0 and n_completed > 0:
+                lat_sum = (cold["execution_start_time"] - cold["arrival_time"]).sum()
+                cold_lat.append(lat_sum / n_completed)
             else:
                 cold_lat.append(0)
         else:
@@ -118,7 +117,7 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
 
     # Remaining panels: single bar, no error bars
     for ax, values, title, fmt in [
-        (axes[0, 1], cold_lat, "Cold Start Latency (s)", "%.2f"),
+        (axes[0, 1], cold_lat, "Cold Latency per Served Request (s)", "%.2f"),
         (axes[1, 0], ram_per_req, "RAM per request", "%.1f"),
         (axes[1, 1], power, "Avg Power (W)", "%.1f"),
     ]:
@@ -270,34 +269,6 @@ def plot_pool_targets(logs: list[dict], labels: list[str], output_dir: str) -> N
     print(f"  Saved: comparison_pool_targets.png")
 
 
-def plot_latency_cdf(logs: list[dict], labels: list[str], output_dir: str) -> None:
-    """CDF of cold-start request latency (execution_start - arrival)."""
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    for log, label, color in zip(logs, labels, COLORS):
-        trace = log.get("trace")
-        if trace is None or len(trace) == 0:
-            continue
-        completed = trace[trace["status"] == "completed"]
-        cold = completed[completed["cold_start"] == True]
-        if len(cold) == 0:
-            continue
-        lat = (cold["execution_start_time"] - cold["arrival_time"]).sort_values()
-        cdf = np.arange(1, len(lat) + 1) / len(lat)
-        ax.plot(lat.values, cdf, label=label, color=color, linewidth=1.5)
-
-    ax.set_xlabel("Cold Start Latency (s)")
-    ax.set_ylabel("CDF")
-    ax.set_title("Cold Start Latency CDF")
-    ax.legend()
-    ax.grid(alpha=0.3)
-
-    plt.tight_layout()
-    fig.savefig(os.path.join(output_dir, "comparison_latency_cdf.png"), dpi=150)
-    plt.close(fig)
-    print(f"  Saved: comparison_latency_cdf.png")
-
-
 def main():
     parser = argparse.ArgumentParser(description="Compare simulation logs")
     parser.add_argument("log_dirs", nargs="+", help="Log directories to compare")
@@ -315,7 +286,6 @@ def main():
     plot_metrics_bar(logs, labels, args.output_dir)
     plot_container_comparison(logs, labels, args.output_dir, smooth=args.smooth)
     plot_pool_targets(logs, labels, args.output_dir)
-    plot_latency_cdf(logs, labels, args.output_dir)
     print(f"\nAll plots in {args.output_dir}/")
 
 
