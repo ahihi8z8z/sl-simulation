@@ -104,9 +104,9 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
     ax = axes[0, 0]
     w = 0.38
     bars_c = ax.bar(x - w / 2, cold_starts, w, color=colors, alpha=0.85,
-                    edgecolor="black", linewidth=0.5, hatch="\\")
+                    edgecolor="black", linewidth=0.5)
     bars_d = ax.bar(x + w / 2, drops, w, color=colors, alpha=0.85,
-                    edgecolor="black", linewidth=0.5, hatch="/")
+                    edgecolor="black", linewidth=0.5, hatch="//")
     ax.bar_label(bars_c, fmt="%.0f", fontsize=7)
     ax.bar_label(bars_d, fmt="%.0f", fontsize=7)
     ax.set_title("Cold Starts & Dropped (requests)", fontsize=11)
@@ -115,8 +115,8 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
     # Legend by hatch style, color-neutral
     from matplotlib.patches import Patch
     legend_handles = [
-        Patch(facecolor="lightgray", edgecolor="black", hatch="\\", label="Cold Starts"),
-        Patch(facecolor="lightgray", edgecolor="black", hatch="/", label="Dropped"),
+        Patch(facecolor="lightgray", edgecolor="black", label="Cold Starts"),
+        Patch(facecolor="lightgray", edgecolor="black", hatch="//", label="Dropped"),
     ]
     ax.legend(handles=legend_handles, fontsize=8)
     ax.grid(axis="y", alpha=0.3)
