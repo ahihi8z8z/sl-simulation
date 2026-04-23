@@ -111,7 +111,7 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
     ax.bar_label(bars_d, fmt="%.0f", fontsize=7)
     ax.set_title("Cold Starts & Dropped (requests)", fontsize=11)
     ax.set_xticks(x)
-    ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+    ax.set_xticklabels(labels, fontsize=8)
     # Legend by hatch style, color-neutral
     from matplotlib.patches import Patch
     legend_handles = [
@@ -131,7 +131,7 @@ def plot_metrics_bar(logs: list[dict], labels: list[str], output_dir: str) -> No
         ax.bar_label(bars, fmt=fmt, fontsize=8, label_type="edge")
         ax.set_title(title, fontsize=11)
         ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=30, ha="right", fontsize=8)
+        ax.set_xticklabels(labels, fontsize=8)
         ax.grid(axis="y", alpha=0.3)
 
     fig.suptitle("Performance Metrics Comparison", fontsize=13)
