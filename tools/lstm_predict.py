@@ -10,7 +10,7 @@ Usage:
     python tools/lstm_predict.py datasets/traffic_pattern/Java_APIG-S_*.csv
     python tools/lstm_predict.py datasets/traffic_pattern/*.csv --window 10 --epochs 100
     python tools/lstm_predict.py datasets/traffic_pattern/*.csv --output-dir outputs/lstm
-    python tools/lstm_predict.py datasets/traffic_pattern/*.csv --hourly --plot
+    python tools/lstm_predict.py datasets/traffic_pattern/*.csv --bucket-minutes 60 --plot
 """
 
 from __future__ import annotations
@@ -82,15 +82,19 @@ def load_and_fill(csv_path: str) -> pd.DataFrame:
     return merged
 
 
-def aggregate_hourly(df: pd.DataFrame) -> pd.DataFrame:
-    """Aggregate minute-level data to hourly: sum count."""
+def aggregate_bucketed(df: pd.DataFrame, n_min: int) -> pd.DataFrame:
+    """Aggregate minute-level data into N-minute buckets: sum count.
+
+    Output columns: minute (bucket start in minutes), function_id, count.
+    """
     df = df.copy()
-    df["hour"] = df["minute"] // 60
-    hourly = df.groupby("hour").agg(
+    df["_bucket"] = df["minute"] // n_min
+    out = df.groupby("_bucket").agg(
         count=("count", "sum"),
         function_id=("function_id", "first"),
     ).reset_index()
-    return hourly
+    out["minute"] = out["_bucket"] * n_min
+    return out[["minute", "function_id", "count"]]
 
 
 def create_sequences(values: np.ndarray, window: int
@@ -338,17 +342,18 @@ def _val_mse_only(
 
 def grid_search(
     values: np.ndarray, train_ratio: float, epochs: int,
-    batch_size: int, patience: int, device: str, hourly: bool,
+    batch_size: int, patience: int, device: str, bucket_minutes: int,
     hidden_size: int = 32,
 ) -> dict:
     """Search best hyperparameters (window, lr) and return the best combo.
 
+    Windows are chosen in time units (~1h, 6h, 24h, 48h of history) so the
+    LSTM sees a comparable horizon regardless of bucket size.
+
     Returns dict with keys: window, lr, val_mse.
     """
-    if hourly:
-        windows = [3, 6, 12, 24]
-    else:
-        windows = [5, 10, 24, 48]
+    horizons_min = [60, 360, 1440, 2880]
+    windows = sorted({max(2, h // bucket_minutes) for h in horizons_min})
     lrs = [1e-2, 1e-3, 1e-4]
 
 
@@ -386,22 +391,29 @@ def grid_search(
 
 def process_csv(csv_path: str, output_dir: str, window: int, train_ratio: float,
                 epochs: int, batch_size: int, lr: float, patience: int,
-                device: str, hourly: bool = False,
+                device: str, bucket_minutes: int = 1,
                 do_grid_search: bool = False, hidden_size: int = 32) -> str | None:
-    """Process a single CSV: train LSTM, save predictions."""
+    """Process a single CSV: train LSTM, save predictions.
+
+    Rows in the output CSV represent one bucket each, with `minute` set to
+    the bucket's start (in minutes). bucket_minutes=1 means per-minute rows.
+    """
     name = Path(csv_path).stem
+    suffix = f" [bucket={bucket_minutes}m]" if bucket_minutes > 1 else ""
     print(f"\n{'='*60}")
-    print(f"Processing: {name}" + (" [hourly]" if hourly else ""))
+    print(f"Processing: {name}{suffix}")
     print(f"{'='*60}")
 
     df_minutes = load_and_fill(csv_path)
 
-    if hourly:
-        df_hourly = aggregate_hourly(df_minutes)
-        values = df_hourly["count"].values
-        print(f"  Aggregated: {len(df_minutes)} minutes -> {len(df_hourly)} hours")
+    if bucket_minutes > 1:
+        df_buckets = aggregate_bucketed(df_minutes, bucket_minutes)
+        values = df_buckets["count"].values
+        print(f"  Aggregated: {len(df_minutes)} minutes -> "
+              f"{len(df_buckets)} buckets of {bucket_minutes}m")
     else:
-        values = df_minutes["count"].values
+        df_buckets = df_minutes[["minute", "function_id", "count"]].copy()
+        values = df_buckets["count"].values
 
     if len(values) < window + 10:
         print(f"  Skipping: only {len(values)} data points (need > {window + 10})")
@@ -412,7 +424,7 @@ def process_csv(csv_path: str, output_dir: str, window: int, train_ratio: float,
         best = grid_search(
             values, train_ratio=train_ratio, epochs=epochs,
             batch_size=batch_size, patience=patience, device=device,
-            hourly=hourly, hidden_size=hidden_size,
+            bucket_minutes=bucket_minutes, hidden_size=hidden_size,
         )
         window = best["window"]
         lr = best["lr"]
@@ -427,48 +439,26 @@ def process_csv(csv_path: str, output_dir: str, window: int, train_ratio: float,
 
     print(f"  Test MSE: {result.test_mse:.4f}")
 
-    # Build output — always minute-level rows
+    # Build output — one row per bucket; `minute` is bucket-start in minutes
     split_idx = int(len(values) * train_ratio)
 
-    out = df_minutes.copy()
+    out = df_buckets.copy()
     out["predicted_count"] = np.nan
     out["phase"] = ""
 
-    if hourly:
-        # Output 1 row per hour — same format as aggregate trace CSV
-        # (minute = hour * 60, count = hourly actual, predicted_count = hourly predicted)
-        out = df_hourly.copy()
-        out["minute"] = out["hour"] * 60  # hour start in minutes
-        out["predicted_count"] = np.nan
-        out["phase"] = ""
+    out.loc[:split_idx - 1, "phase"] = "train"
+    out.loc[split_idx:, "phase"] = "test"
 
-        # Mark phases
-        out.loc[:split_idx - 1, "phase"] = "train"
-        out.loc[split_idx:, "phase"] = "test"
+    # Fill predictions (offset by window)
+    train_start = window
+    train_end = train_start + len(train_pred)
+    test_start = train_end
+    test_end = test_start + len(test_pred)
 
-        # Fill predictions (offset by window)
-        train_start = window
-        train_end = train_start + len(train_pred)
-        test_start = train_end
-        test_end = test_start + len(test_pred)
+    out.loc[train_start:train_end - 1, "predicted_count"] = train_pred
+    out.loc[test_start:test_end - 1, "predicted_count"] = test_pred
 
-        out.loc[train_start:train_end - 1, "predicted_count"] = train_pred
-        out.loc[test_start:test_end - 1, "predicted_count"] = test_pred
-
-        out = out[["minute", "function_id", "count", "predicted_count", "phase"]]
-    else:
-        # Mark phases on all rows
-        out.loc[:split_idx - 1, "phase"] = "train"
-        out.loc[split_idx:, "phase"] = "test"
-
-        # Fill predictions (offset by window)
-        train_start = window
-        train_end = train_start + len(train_pred)
-        test_start = train_end
-        test_end = test_start + len(test_pred)
-
-        out.loc[train_start:train_end - 1, "predicted_count"] = train_pred
-        out.loc[test_start:test_end - 1, "predicted_count"] = test_pred
+    out = out[["minute", "function_id", "count", "predicted_count", "phase"]]
 
     # Save
     os.makedirs(output_dir, exist_ok=True)
@@ -480,7 +470,7 @@ def process_csv(csv_path: str, output_dir: str, window: int, train_ratio: float,
     return out_path, result
 
 
-def plot_predictions(csv_path: str, output_dir: str, hourly: bool = False,
+def plot_predictions(csv_path: str, output_dir: str, bucket_minutes: int = 1,
                      plot_range: tuple[float, float] | None = None,
                      plot_style: str = "scatter") -> None:
     """Plot actual vs predicted invocation counts from a result CSV."""
@@ -491,20 +481,9 @@ def plot_predictions(csv_path: str, output_dir: str, hourly: bool = False,
     df = pd.read_csv(csv_path)
     name = Path(csv_path).stem.replace("_lstm_pred", "")
 
-    if hourly:
-        # CSV already has 1 row per hour with hourly counts
-        plot_df = df.copy()
-        plot_df["hour"] = plot_df["minute"] // 60
-        x_col = "hour"
-        x_divisor = 24.0  # hours -> days
-    else:
-        plot_df = df
-        x_col = "minute"
-        x_divisor = 1440.0  # minutes -> days
-
-    # Convert x values to days for plotting
-    plot_df = plot_df.copy()
-    plot_df["_x_days"] = plot_df[x_col] / x_divisor
+    # CSV rows are one per bucket; `minute` is bucket start. Convert to days.
+    plot_df = df.copy()
+    plot_df["_x_days"] = plot_df["minute"] / 1440.0
     x_col = "_x_days"
     x_label = "Day"
 
@@ -542,7 +521,8 @@ def plot_predictions(csv_path: str, output_dir: str, hourly: bool = False,
                    label="Train/Test split")
 
     ax.set_ylabel("Invocation Count")
-    ax.set_title(f"LSTM Predictions — {name}" + (" (hourly)" if hourly else ""))
+    title_suffix = f" (bucket={bucket_minutes}m)" if bucket_minutes > 1 else ""
+    ax.set_title(f"LSTM Predictions — {name}{title_suffix}")
     ax.legend(loc="upper right", fontsize=8)
     ax.grid(True, alpha=0.3)
 
@@ -633,8 +613,9 @@ def main():
                         help="Device: cpu or cuda (default: cpu)")
     parser.add_argument("--plot", nargs="?", const="all", default=None, metavar="RANGE",
                         help="Generate plots. Optional day range: --plot 5-10 (default: all)")
-    parser.add_argument("--hourly", action="store_true",
-                        help="Aggregate to hourly before training; plot by hours, output in minutes")
+    parser.add_argument("--bucket-minutes", type=int, default=1,
+                        help="Aggregate input to N-minute buckets before training "
+                             "(default: 1 = per-minute; 60 = hourly)")
     parser.add_argument("--plot-style", choices=["scatter", "line"], default="scatter",
                         help="Plot style: scatter or line (default: scatter)")
     parser.add_argument("--grid-search", action="store_true",
@@ -643,12 +624,15 @@ def main():
                         help="LSTM hidden size (default: 32)")
     args = parser.parse_args()
 
+    if args.bucket_minutes < 1:
+        parser.error("--bucket-minutes must be >= 1")
+
     results = []
     for csv_path in args.csv_files:
         ret = process_csv(
             csv_path, args.output_dir, args.window, args.train_ratio,
             args.epochs, args.batch_size, args.lr, args.patience, args.device,
-            hourly=args.hourly, do_grid_search=args.grid_search,
+            bucket_minutes=args.bucket_minutes, do_grid_search=args.grid_search,
             hidden_size=args.hidden_size,
         )
         if ret is not None:
@@ -663,7 +647,8 @@ def main():
         print("\nGenerating plots...")
         for csv_path, out_path, result in results:
             name = Path(csv_path).stem
-            plot_predictions(out_path, args.output_dir, hourly=args.hourly,
+            plot_predictions(out_path, args.output_dir,
+                             bucket_minutes=args.bucket_minutes,
                              plot_range=plot_range, plot_style=args.plot_style)
             plot_training_curves(
                 result.train_losses, result.val_losses,
