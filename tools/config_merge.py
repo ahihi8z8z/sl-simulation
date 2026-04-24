@@ -132,17 +132,11 @@ def load_experiments(experiments_path: str) -> tuple[str, dict]:
         with open(exp_dir / gym_def) as f:
             data["gym_defaults"] = json.load(f)
 
-    # Load infer_defaults from file if it's a string path
-    infer_def = data.get("infer_defaults")
-    if isinstance(infer_def, str):
-        with open(exp_dir / infer_def) as f:
-            data["infer_defaults"] = json.load(f)
-
-    # Load sim_defaults from file if it's a string path
-    sim_def = data.get("sim_defaults")
-    if isinstance(sim_def, str):
-        with open(exp_dir / sim_def) as f:
-            data["sim_defaults"] = json.load(f)
+    # Load run_defaults from file if it's a string path
+    run_def = data.get("run_defaults")
+    if isinstance(run_def, str):
+        with open(exp_dir / run_def) as f:
+            data["run_defaults"] = json.load(f)
 
     return data["_base_path"], data
 
@@ -200,34 +194,6 @@ def build_gym_config(experiment: dict, data: dict) -> dict | None:
     return config
 
 
-def get_sim_seeds(experiment: dict, data: dict) -> list[int]:
-    """Resolve seed list for an experiment's simulation runs.
-
-    Precedence: experiment.sim.seeds → sim_defaults.seeds → [42].
-    """
-    exp_sim = experiment.get("sim", {})
-    if "seeds" in exp_sim:
-        return list(exp_sim["seeds"])
-    defaults = data.get("sim_defaults", {})
-    if "seeds" in defaults:
-        return list(defaults["seeds"])
-    return [42]
-
-
-def get_infer_seeds(experiment: dict, data: dict) -> list[int]:
-    """Resolve seed list for an experiment's inference runs.
-
-    Precedence: experiment.infer.seeds → infer_defaults.seeds → [42].
-    """
-    exp_infer = experiment.get("infer", {})
-    if "seeds" in exp_infer:
-        return list(exp_infer["seeds"])
-    defaults = data.get("infer_defaults", {})
-    if "seeds" in defaults:
-        return list(defaults["seeds"])
-    return [42]
-
-
 def build_infer_config(
     experiment: dict,
     data: dict,
@@ -239,11 +205,9 @@ def build_infer_config(
     Returns None for non-RL experiments (baselines run via simulate, not infer).
 
     Fields derived from:
-      - rl_template        → algorithm, env
+      - rl_template        → algorithm, env, device, deterministic
       - experiment name    → model_path (default: logs/<name>/models/best/best_model)
       - rl overrides       → frame_stack (mirrored so VecFrameStack matches training)
-      - infer_defaults     → deterministic, device, n_episodes
-      - experiment.infer   → per-experiment overrides (seeds handled separately)
 
     If seed is provided, it is inserted as rl_config["seed"].
     """
@@ -256,23 +220,20 @@ def build_infer_config(
         raise ValueError(f"Unknown rl_template: {template_name}")
     template = templates[template_name]
 
-    defaults = data.get("infer_defaults", {})
-    config = {k: v for k, v in defaults.items() if k != "seeds"}
+    config = {
+        "deterministic": template.get("deterministic", True),
+        "device": template.get("device", "auto"),
+    }
 
     name = experiment["name"]
-    config.setdefault("algorithm", template["algorithm"])
-    config.setdefault("env", template["env"])
-    config.setdefault("model_path", f"{output_base}/{name}/models/best/best_model")
+    config["algorithm"] = template["algorithm"]
+    config["env"] = template["env"]
+    config["model_path"] = f"{output_base}/{name}/models/best/best_model"
 
     rl_overrides = experiment.get("rl", {})
     frame_stack = rl_overrides.get("frame_stack", template.get("frame_stack", 1))
     if frame_stack > 1:
         config["frame_stack"] = frame_stack
-
-    infer_overrides = {
-        k: v for k, v in experiment.get("infer", {}).items() if k != "seeds"
-    }
-    config.update(infer_overrides)
 
     if seed is not None:
         config["seed"] = seed
