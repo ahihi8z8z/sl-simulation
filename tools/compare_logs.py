@@ -61,7 +61,10 @@ def load_log(log_dir: str) -> dict:
     .seeds as a list. Otherwise log_dir itself is treated as a single
     seed (list of length 1). Callers always work with .seeds.
     """
-    seed_subdirs = sorted(glob.glob(os.path.join(log_dir, "seed_*")))
+    seed_subdirs = sorted(
+        glob.glob(os.path.join(log_dir, "seed_*"))
+        + glob.glob(os.path.join(log_dir, "episode_*"))
+    )
     seed_subdirs = [d for d in seed_subdirs if os.path.isdir(d)]
 
     if seed_subdirs:

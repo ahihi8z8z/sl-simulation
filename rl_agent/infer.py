@@ -73,13 +73,16 @@ def run_inference(
     all_steps = []
 
     for ep in range(n_episodes):
+        # Per-episode output folder when running multiple episodes
+        ep_dir = os.path.join(run_dir, f"episode_{ep}") if n_episodes > 1 else run_dir
+        os.makedirs(ep_dir, exist_ok=True)
+
         # Inject run_dir into gym_config for export
         if gym_config_path:
-            import tempfile
             with open(gym_config_path) as f:
                 gym_cfg = json.load(f)
-            gym_cfg["run_dir"] = run_dir
-            _tmp_gym = os.path.join(run_dir, f"_gym_ep{ep}.json")
+            gym_cfg["run_dir"] = ep_dir
+            _tmp_gym = os.path.join(ep_dir, f"_gym_ep{ep}.json")
             with open(_tmp_gym, "w") as f:
                 json.dump(gym_cfg, f)
             env = env_class(sim_config_path, _tmp_gym, seed=seed + ep)
