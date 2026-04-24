@@ -235,6 +235,10 @@ def build_infer_config(
     if frame_stack > 1:
         config["frame_stack"] = frame_stack
 
+    # Apply experiment.infer overrides (e.g. custom model_path)
+    infer_overrides = experiment.get("infer", {})
+    config.update(infer_overrides)
+
     if seed is not None:
         config["seed"] = seed
 
