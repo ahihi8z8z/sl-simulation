@@ -93,9 +93,10 @@ def run_inference(
             vec_env = VecNormalize.load(vec_norm_path, vec_env)
             vec_env.training = False
             vec_env.norm_reward = False
+            vec_env.seed(seed + ep)
             obs = vec_env.reset()
         else:
-            obs, _ = env.reset()
+            obs, _ = env.reset(seed=seed + ep)
 
         episode_reward = 0.0
         step_count = 0

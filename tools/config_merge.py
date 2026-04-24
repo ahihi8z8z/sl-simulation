@@ -186,3 +186,69 @@ def build_gym_config(experiment: dict, data: dict) -> dict | None:
             config[key] = value
 
     return config
+
+
+def get_infer_seeds(experiment: dict, data: dict) -> list[int]:
+    """Resolve seed list for an experiment's inference runs.
+
+    Precedence: experiment.infer.seeds → infer_defaults.seeds → [42].
+    """
+    exp_infer = experiment.get("infer", {})
+    if "seeds" in exp_infer:
+        return list(exp_infer["seeds"])
+    defaults = data.get("infer_defaults", {})
+    if "seeds" in defaults:
+        return list(defaults["seeds"])
+    return [42]
+
+
+def build_infer_config(
+    experiment: dict,
+    data: dict,
+    seed: int | None = None,
+    output_base: str = "logs",
+) -> dict | None:
+    """Build an inference rl_config for one experiment + one seed.
+
+    Returns None for non-RL experiments (baselines run via simulate, not infer).
+
+    Fields derived from:
+      - rl_template        → algorithm, env
+      - experiment name    → model_path (default: logs/<name>/models/best/best_model)
+      - rl overrides       → frame_stack (mirrored so VecFrameStack matches training)
+      - infer_defaults     → deterministic, device, n_episodes
+      - experiment.infer   → per-experiment overrides (seeds handled separately)
+
+    If seed is provided, it is inserted as rl_config["seed"].
+    """
+    template_name = experiment.get("rl_template")
+    if template_name is None:
+        return None
+
+    templates = data.get("rl_templates", {})
+    if template_name not in templates:
+        raise ValueError(f"Unknown rl_template: {template_name}")
+    template = templates[template_name]
+
+    defaults = data.get("infer_defaults", {})
+    config = {k: v for k, v in defaults.items() if k != "seeds"}
+
+    name = experiment["name"]
+    config.setdefault("algorithm", template["algorithm"])
+    config.setdefault("env", template["env"])
+    config.setdefault("model_path", f"{output_base}/{name}/models/best/best_model")
+
+    rl_overrides = experiment.get("rl", {})
+    frame_stack = rl_overrides.get("frame_stack", template.get("frame_stack", 1))
+    if frame_stack > 1:
+        config["frame_stack"] = frame_stack
+
+    infer_overrides = {
+        k: v for k, v in experiment.get("infer", {}).items() if k != "seeds"
+    }
+    config.update(infer_overrides)
+
+    if seed is not None:
+        config["seed"] = seed
+
+    return config
