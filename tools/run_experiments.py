@@ -149,11 +149,14 @@ def main():
                         help="Comma-separated exact experiment names to run")
     parser.add_argument("--parallel", type=int, default=1, help="Parallel workers (default: 1)")
     parser.add_argument("--progress", action="store_true", help="Show progress bar (sequential only)")
+    parser.add_argument("--seeds", default=None,
+                        help="Comma-separated seeds override (e.g. 42,43)")
     parser.add_argument("--dump-config", default=None, metavar="NAME",
                         help="Dump merged config for an experiment and exit")
     args = parser.parse_args()
 
-    from tools.config_merge import load_experiments, load_merged_config
+    import copy
+    from tools.config_merge import load_experiments, load_merged_config, get_sim_seeds
 
     base_path, data = load_experiments(args.experiments_file)
     experiments = data["experiments"]
@@ -178,23 +181,30 @@ def main():
         print("No matching experiments found")
         return
 
-    # Output directory
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    sweep_dir = os.path.join("logs", f"experiments_{timestamp}")
-    os.makedirs(sweep_dir, exist_ok=True)
+    seed_override = None
+    if args.seeds:
+        seed_override = [int(s.strip()) for s in args.seeds.split(",")]
 
-    print(f"Running {len(sim_experiments)} experiments")
-    print(f"Output: {sweep_dir}\n")
-    for e in sim_experiments:
-        print(f"  {e['name']}")
-    print()
+    sim_defaults = data.get("sim_defaults", {})
+    export_mode = sim_defaults.get("export_mode", 2)
 
-    # Build merged configs
+    # Build merged configs × seeds
     jobs = []
     for exp in sim_experiments:
-        config = load_merged_config(base_path, exp.get("overrides"))
-        run_dir = os.path.join(sweep_dir, exp["name"])
-        jobs.append((config, exp["name"], run_dir))
+        seeds = seed_override or get_sim_seeds(exp, data)
+        base_config = load_merged_config(base_path, exp.get("overrides"))
+        for seed in seeds:
+            config = copy.deepcopy(base_config)
+            config["simulation"]["seed"] = seed
+            config["simulation"]["export_mode"] = export_mode
+            run_dir = os.path.join("logs", exp["name"], "sim", f"seed_{seed}")
+            jobs.append((config, exp["name"], run_dir))
+
+    print(f"Running {len(jobs)} jobs ({len(sim_experiments)} experiments)")
+    for exp in sim_experiments:
+        seeds = seed_override or get_sim_seeds(exp, data)
+        print(f"  {exp['name']} seeds={seeds}")
+    print()
 
     results = {}
     t_total = time.monotonic()
@@ -203,33 +213,32 @@ def main():
     if n_workers > 1:
         with ProcessPoolExecutor(max_workers=n_workers) as executor:
             futures = {
-                executor.submit(_run_worker, cfg, name, rd): name
+                executor.submit(_run_worker, cfg, name, rd): (name, rd)
                 for cfg, name, rd in jobs
             }
             for future in as_completed(futures):
                 name, summary, elapsed = future.result()
-                results[name] = summary
-                print(_format_result(name, summary, elapsed))
+                _, rd = futures[future]
+                label = os.path.basename(rd)
+                results[f"{name}/{label}"] = summary
+                print(_format_result(f"{name}/{label}", summary, elapsed))
     else:
         for i, (config, name, run_dir) in enumerate(jobs, 1):
-            print(f"[{i}/{len(jobs)}] Running {name}...")
+            label = os.path.basename(run_dir)
+            print(f"[{i}/{len(jobs)}] Running {name} {label}...")
             t0 = time.monotonic()
             try:
                 summary = _run_single(config, name, run_dir, progress=args.progress)
                 elapsed = time.monotonic() - t0
-                results[name] = summary
-                print(_format_result(name, summary, elapsed))
+                results[f"{name}/{label}"] = summary
+                print(_format_result(f"{name}/{label}", summary, elapsed))
             except Exception as e:
                 elapsed = time.monotonic() - t0
-                results[name] = {"error": str(e)}
+                results[f"{name}/{label}"] = {"error": str(e)}
                 print(f"  FAILED in {elapsed:.1f}s: {e}")
 
     total_elapsed = time.monotonic() - t_total
-
-    output_path = os.path.join(sweep_dir, "results.csv")
-    _save_results_csv(results, output_path)
-    print(f"\nResults saved to {output_path}")
-    print(f"Total time: {total_elapsed:.1f}s")
+    print(f"\nTotal time: {total_elapsed:.1f}s")
     _print_table(results)
 
 

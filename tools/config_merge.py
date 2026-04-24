@@ -138,6 +138,12 @@ def load_experiments(experiments_path: str) -> tuple[str, dict]:
         with open(exp_dir / infer_def) as f:
             data["infer_defaults"] = json.load(f)
 
+    # Load sim_defaults from file if it's a string path
+    sim_def = data.get("sim_defaults")
+    if isinstance(sim_def, str):
+        with open(exp_dir / sim_def) as f:
+            data["sim_defaults"] = json.load(f)
+
     return data["_base_path"], data
 
 
@@ -192,6 +198,20 @@ def build_gym_config(experiment: dict, data: dict) -> dict | None:
             config[key] = value
 
     return config
+
+
+def get_sim_seeds(experiment: dict, data: dict) -> list[int]:
+    """Resolve seed list for an experiment's simulation runs.
+
+    Precedence: experiment.sim.seeds → sim_defaults.seeds → [42].
+    """
+    exp_sim = experiment.get("sim", {})
+    if "seeds" in exp_sim:
+        return list(exp_sim["seeds"])
+    defaults = data.get("sim_defaults", {})
+    if "seeds" in defaults:
+        return list(defaults["seeds"])
+    return [42]
 
 
 def get_infer_seeds(experiment: dict, data: dict) -> list[int]:
