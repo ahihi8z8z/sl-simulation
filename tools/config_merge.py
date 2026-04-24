@@ -132,6 +132,12 @@ def load_experiments(experiments_path: str) -> tuple[str, dict]:
         with open(exp_dir / gym_def) as f:
             data["gym_defaults"] = json.load(f)
 
+    # Load infer_defaults from file if it's a string path
+    infer_def = data.get("infer_defaults")
+    if isinstance(infer_def, str):
+        with open(exp_dir / infer_def) as f:
+            data["infer_defaults"] = json.load(f)
+
     return data["_base_path"], data
 
 
