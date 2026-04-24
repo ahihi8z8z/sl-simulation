@@ -8,10 +8,18 @@ import os
 from stable_baselines3 import PPO, A2C, DQN, SAC
 from stable_baselines3.common.callbacks import BaseCallback, EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.monitor import Monitor
+from stable_baselines3.common.utils import LinearSchedule
 from stable_baselines3.common.vec_env import (
     DummyVecEnv, SubprocVecEnv, VecNormalize, VecFrameStack, unwrap_vec_normalize,
 )
 from sb3_contrib import MaskablePPO, RecurrentPPO
+
+
+def _parse_lr(v):
+    """Parse learning rate: plain number or "lin_<start>" for linear decay to 0."""
+    if isinstance(v, str) and v.startswith("lin_"):
+        return LinearSchedule(float(v[4:]), 0.0, 1.0)
+    return float(v)
 
 
 class CheckpointWithNormalize(BaseCallback):
@@ -143,7 +151,7 @@ def run_training(
     model_kwargs = dict(
         policy=policy_name,
         env=vec_env,
-        learning_rate=rl_config.get("learning_rate", 3e-4),
+        learning_rate=_parse_lr(rl_config.get("learning_rate", 3e-4)),
         gamma=rl_config.get("gamma", 0.99),
         device=rl_config.get("device", "auto"),
         verbose=1,
