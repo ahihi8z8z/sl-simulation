@@ -119,6 +119,16 @@ def _run_infer(exp: dict, data: dict, base_path: str,
     return {}
 
 
+def _infer_worker(exp, data, base_path, base_seed, ep, ep_dir, export_mode):
+    """Worker for parallel infer execution."""
+    t0 = time.monotonic()
+    try:
+        summary = _run_infer(exp, data, base_path, base_seed, ep, ep_dir, export_mode)
+        return exp["name"], ep_dir, summary, time.monotonic() - t0
+    except Exception as e:
+        return exp["name"], ep_dir, {"error": str(e)}, time.monotonic() - t0
+
+
 # ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
@@ -291,24 +301,44 @@ def main():
                     results[label] = {"error": str(e)}
                     print(f"  FAILED in {elapsed:.1f}s: {e}")
 
-    # --- Infer jobs (sequential — GPU / model loading) ---
-    for exp in runnable_infer:
-        for ep in range(n_episodes):
-            job_i += 1
-            ep_dir = os.path.join("logs", exp["name"], "infer", f"episode_{ep}")
-            label = f"{exp['name']}/{os.path.basename(ep_dir)}"
-            print(f"[{job_i}/{total_jobs}] {exp['name']} episode_{ep}...")
-            t0 = time.monotonic()
-            try:
-                summary = _run_infer(exp, data, base_path,
-                                     base_seed, ep, ep_dir, export_mode)
-                elapsed = time.monotonic() - t0
-                results[label] = summary
-                print(_format_result(label, summary, elapsed))
-            except Exception as e:
-                elapsed = time.monotonic() - t0
-                results[label] = {"error": str(e)}
-                print(f"  FAILED in {elapsed:.1f}s: {e}")
+    # --- Infer jobs ---
+    if runnable_infer:
+        infer_jobs = []
+        for exp in runnable_infer:
+            for ep in range(n_episodes):
+                ep_dir = os.path.join("logs", exp["name"], "infer", f"episode_{ep}")
+                infer_jobs.append((exp, ep, ep_dir))
+
+        n_workers = min(args.parallel, len(infer_jobs))
+        if n_workers > 1:
+            with ProcessPoolExecutor(max_workers=n_workers) as executor:
+                futures = {
+                    executor.submit(_infer_worker, exp, data, base_path,
+                                    base_seed, ep, ep_dir, export_mode): (exp, ep_dir)
+                    for exp, ep, ep_dir in infer_jobs
+                }
+                for future in as_completed(futures):
+                    name, rd, summary, elapsed = future.result()
+                    job_i += 1
+                    label = f"{name}/{os.path.basename(rd)}"
+                    results[label] = summary
+                    print(f"[{job_i}/{total_jobs}] {_format_result(label, summary, elapsed)}")
+        else:
+            for exp, ep, ep_dir in infer_jobs:
+                job_i += 1
+                label = f"{exp['name']}/{os.path.basename(ep_dir)}"
+                print(f"[{job_i}/{total_jobs}] {exp['name']} episode_{ep}...")
+                t0 = time.monotonic()
+                try:
+                    summary = _run_infer(exp, data, base_path,
+                                         base_seed, ep, ep_dir, export_mode)
+                    elapsed = time.monotonic() - t0
+                    results[label] = summary
+                    print(_format_result(label, summary, elapsed))
+                except Exception as e:
+                    elapsed = time.monotonic() - t0
+                    results[label] = {"error": str(e)}
+                    print(f"  FAILED in {elapsed:.1f}s: {e}")
 
     total_elapsed = time.monotonic() - t_total
     passed = sum(1 for s in results.values() if "error" not in s)
