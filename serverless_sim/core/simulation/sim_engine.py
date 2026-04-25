@@ -39,7 +39,7 @@ class SimulationEngine:
         """
         config_sim = self.ctx.config["simulation"]
         duration = config_sim["duration"]
-        start_delay = self.ctx.config.get("workload", {}).get("start_delay", 0)
+        start_delay = config_sim.get("start_delay", 0)
 
         # Warmup: let system (pools, autoscaler) initialize before traffic
         if start_delay > 0:

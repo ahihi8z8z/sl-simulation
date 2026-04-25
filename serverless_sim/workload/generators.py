@@ -29,8 +29,7 @@ class BaseGenerator:
 
     def _make_invocation(self, ctx: SimContext, service: ServiceClass) -> Invocation:
         """Create an Invocation and assign service_time via provider."""
-        self._request_counter += 1
-        request_id = f"req-{self._request_counter}"
+        request_id = ctx.next_request_id()
         inv = Invocation(
             request_id=request_id,
             service_id=service.service_id,
@@ -58,7 +57,6 @@ class GammaArrivalGenerator(BaseGenerator):
 
     def __init__(self, alpha: float = 1.0, beta: float = 1.0):
         self.ctx: SimContext | None = None
-        self._request_counter = 0
         self._rng = None
         self._alpha = alpha
         self._beta = beta
@@ -100,7 +98,6 @@ class GammaWindowGenerator(BaseGenerator):
 
     def __init__(self, csv_path: str, scale_alpha: float = 1.0, scale_beta: float = 1.0):
         self.ctx: SimContext | None = None
-        self._request_counter = 0
         self._rng = None
         self._csv_path = csv_path
         self._scale_alpha = scale_alpha
@@ -189,7 +186,6 @@ class PoissonFixedSizeGenerator(BaseGenerator):
 
     def __init__(self, arrival_rate: float = 1.0):
         self.ctx: SimContext | None = None
-        self._request_counter = 0
         self._rng = None
         self._arrival_rate = arrival_rate
 

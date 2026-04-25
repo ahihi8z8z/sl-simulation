@@ -41,6 +41,7 @@ SAMPLE_CONFIG = {
             "service_id": "svc-a",
             "max_concurrency": 4,
             "lifecycle": LIFECYCLE_256_1,
+            "workload": {"arrival_rate": 5.0},
         }
     ],
     "cluster": {
@@ -48,7 +49,6 @@ SAMPLE_CONFIG = {
             {"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192},
         ]
     },
-    "workload": {"arrival_rate": 5.0},
 }
 
 
@@ -170,6 +170,7 @@ class TestLifecycleEndToEnd:
                             {"from": "prewarm", "to": "evicted", "time": 0.0},
                         ],
                     },
+                    "workload": {"arrival_rate": 20.0},
                 }
             ],
             "cluster": {
@@ -177,7 +178,6 @@ class TestLifecycleEndToEnd:
                     {"node_id": "node-0", "cpu_capacity": 16.0, "memory_capacity": 16384},
                 ]
             },
-            "workload": {"arrival_rate": 20.0},
         }
         ctx = _make_ctx(config=config)
         ctx.cluster_manager.start_all()

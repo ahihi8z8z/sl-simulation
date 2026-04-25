@@ -49,13 +49,13 @@ EXTENDED_CONFIG = {
             "job_size": 0.1,
             "max_concurrency": 4,
             "lifecycle": EXTENDED_LIFECYCLE,
+            "workload": {"arrival_rate": 3.0},
         }
     ],
     "cluster": {
         "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 16384}]
     },
     "monitoring": {"interval": 1.0, "max_history_length": 100},
-    "workload": {"arrival_rate": 3.0},
 }
 
 

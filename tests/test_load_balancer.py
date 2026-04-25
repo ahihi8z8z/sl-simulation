@@ -39,6 +39,7 @@ SAMPLE_CONFIG = {
             "service_id": "svc-a",
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
+            "workload": {"arrival_rate": 10.0},
         }
     ],
     "cluster": {
@@ -47,7 +48,6 @@ SAMPLE_CONFIG = {
             {"node_id": "node-1", "cpu_capacity": 4.0, "memory_capacity": 4096},
         ]
     },
-    "workload": {"arrival_rate": 10.0},
 }
 
 

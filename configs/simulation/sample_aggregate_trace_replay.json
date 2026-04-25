@@ -5,15 +5,14 @@
     "export_mode": 2,
     "drain_timeout": 30.0
   },
-  "workload": {
-    "generator": "aggregate_trace",
-    "trace_path": "configs/simulation/sample_aggregate_trace.csv",
-    "scale": 2.0
-  },
   "services": [
     {
       "service_id": "svc-hello",
-      "arrival_rate": 0,
+      "workload": {
+        "generator": "aggregate_trace",
+        "trace_path": "configs/simulation/sample_aggregate_trace.csv",
+        "scale": 2.0
+      },
       "max_concurrency": 1,
       "min_instances": 0,
       "max_instances": 0,

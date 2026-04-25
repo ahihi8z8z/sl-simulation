@@ -3,7 +3,7 @@
 For each {Runtime}_{Trigger}_{ID}.csv traffic file:
   1. Find matching {ID}_runtime_cost.csv
   2. Merge runtime cost as execution duration per minute
-  3. Output: minute,function_id,count,duration
+  3. Output: minute,count,duration  (one file per service)
 
 Usage:
     python tools/merge_traces.py [--input-dir datasets/request_per_min] [--output-dir datasets/merged]
@@ -114,13 +114,13 @@ def merge_and_write(pair: dict, output_dir: str) -> str:
     output_path = os.path.join(output_dir, f"{function_id}_{pair['trace_id']}.csv")
     with open(output_path, "w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["minute", "function_id", "count", "duration"])
+        writer.writerow(["minute", "count", "duration"])
         for minute in all_minutes:
             count = traffic[minute]
             if count <= 0:
                 continue
             duration = runtime_costs.get(minute, default_duration)
-            writer.writerow([minute, function_id, int(round(count)), f"{duration:.6f}"])
+            writer.writerow([minute, int(round(count)), f"{duration:.6f}"])
 
     return output_path
 

@@ -90,8 +90,13 @@ class SimulationBuilder:
 
             if policy_type == "predictive":
                 from serverless_sim.controller.policies.predictive_policy import PredictivePolicy
+                predict_paths = {
+                    svc_cfg["service_id"]: svc_cfg["predict_path"]
+                    for svc_cfg in config["services"]
+                    if svc_cfg.get("predict_path")
+                }
                 policy = PredictivePolicy(
-                    predict_path=ctrl_cfg["predict_path"],
+                    predict_paths=predict_paths,
                     predict_column=ctrl_cfg.get("predict_column", "predicted_count"),
                     predict_scale=ctrl_cfg.get("predict_scale", 1.0),
                     avg_duration=ctrl_cfg.get("avg_duration", 0.0),

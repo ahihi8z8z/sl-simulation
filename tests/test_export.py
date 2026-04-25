@@ -44,13 +44,13 @@ CONFIG = {
             "service_id": "svc-a",
             "max_concurrency": 4,
             "lifecycle": LIFECYCLE_256_1,
+            "workload": {"arrival_rate": 5.0},
         }
     ],
     "cluster": {
         "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}]
     },
     "monitoring": {"interval": 1.0, "max_history_length": 100},
-    "workload": {"arrival_rate": 5.0},
 }
 
 

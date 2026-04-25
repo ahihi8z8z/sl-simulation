@@ -38,6 +38,7 @@ QUEUE_LIMIT_CONFIG = {
             "job_size": 1.0,
             "max_concurrency": 1,
             "lifecycle": LIFECYCLE_256_1,
+            "workload": {"arrival_rate": 100.0},
         }
     ],
     "cluster": {
@@ -51,7 +52,6 @@ QUEUE_LIMIT_CONFIG = {
         ]
     },
     "monitoring": {"interval": 1.0, "max_history_length": 100},
-    "workload": {"arrival_rate": 100.0},
 }
 
 

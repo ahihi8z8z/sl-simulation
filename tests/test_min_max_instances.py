@@ -48,25 +48,24 @@ def _make_config(
     node_memory=8192,
     pool_targets=None,
 ):
+    service_cfg = {
+        "service_id": "svc-a",
+        "max_concurrency": max_concurrency,
+        "min_instances": min_instances,
+        "max_instances": max_instances,
+        "lifecycle": _make_lifecycle(memory=memory, cpu=cpu),
+    }
+    if arrival_rate > 0.0:
+        service_cfg["workload"] = {"arrival_rate": arrival_rate}
     config = {
         "simulation": {"duration": 100.0, "seed": 42, "export_mode": 0},
-        "services": [
-            {
-                "service_id": "svc-a",
-                "max_concurrency": max_concurrency,
-                "min_instances": min_instances,
-                "max_instances": max_instances,
-                "lifecycle": _make_lifecycle(memory=memory, cpu=cpu),
-            }
-        ],
+        "services": [service_cfg],
         "cluster": {
             "nodes": [
                 {"node_id": "node-0", "cpu_capacity": 16.0, "memory_capacity": node_memory},
             ]
         },
     }
-    if arrival_rate > 0.0:
-        config["workload"] = {"arrival_rate": arrival_rate}
     return config
 
 

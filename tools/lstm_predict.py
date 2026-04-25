@@ -73,28 +73,23 @@ class LSTMPredictor(nn.Module):
 def load_and_fill(csv_path: str) -> pd.DataFrame:
     """Load traffic CSV and fill missing minutes with count=0."""
     df = pd.read_csv(csv_path)
-    # Build full minute range and fill gaps with 0 invocations
     minutes = np.arange(df["minute"].min(), df["minute"].max() + 1)
     full = pd.DataFrame({"minute": minutes})
     merged = full.merge(df, on="minute", how="left")
     merged["count"] = merged["count"].fillna(0).astype(float)
-    merged["function_id"] = merged["function_id"].ffill().bfill()
     return merged
 
 
 def aggregate_bucketed(df: pd.DataFrame, n_min: int) -> pd.DataFrame:
     """Aggregate minute-level data into N-minute buckets: sum count.
 
-    Output columns: minute (bucket start in minutes), function_id, count.
+    Output columns: minute (bucket start in minutes), count.
     """
     df = df.copy()
     df["_bucket"] = df["minute"] // n_min
-    out = df.groupby("_bucket").agg(
-        count=("count", "sum"),
-        function_id=("function_id", "first"),
-    ).reset_index()
+    out = df.groupby("_bucket").agg(count=("count", "sum")).reset_index()
     out["minute"] = out["_bucket"] * n_min
-    return out[["minute", "function_id", "count"]]
+    return out[["minute", "count"]]
 
 
 def create_sequences(values: np.ndarray, window: int
@@ -412,7 +407,7 @@ def process_csv(csv_path: str, output_dir: str, window: int, train_ratio: float,
         print(f"  Aggregated: {len(df_minutes)} minutes -> "
               f"{len(df_buckets)} buckets of {bucket_minutes}m")
     else:
-        df_buckets = df_minutes[["minute", "function_id", "count"]].copy()
+        df_buckets = df_minutes[["minute", "count"]].copy()
         values = df_buckets["count"].values
 
     if len(values) < window + 10:
@@ -458,7 +453,7 @@ def process_csv(csv_path: str, output_dir: str, window: int, train_ratio: float,
     out.loc[train_start:train_end - 1, "predicted_count"] = train_pred
     out.loc[test_start:test_end - 1, "predicted_count"] = test_pred
 
-    out = out[["minute", "function_id", "count", "predicted_count", "phase"]]
+    out = out[["minute", "count", "predicted_count", "phase"]]
 
     # Save
     os.makedirs(output_dir, exist_ok=True)

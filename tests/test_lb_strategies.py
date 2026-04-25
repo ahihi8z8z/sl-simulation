@@ -54,10 +54,10 @@ def _make_config(strategy="hash_ring", num_nodes=2):
             "service_id": "svc-a",
             "max_concurrency": 4,
             "lifecycle": LIFECYCLE_CFG,
+            "workload": {"arrival_rate": 5.0},
         }],
         "cluster": {"nodes": nodes},
         "scheduling": {"strategy": strategy},
-        "workload": {"arrival_rate": 5.0},
     }
 
 

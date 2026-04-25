@@ -1,19 +1,21 @@
 """Trace-replay workload generators.
 
-Two generators are available:
+Each generator instance replays a per-service trace file.  The CSV
+contains only timing/count columns — service routing comes from the
+service the generator is bound to via
+``services[i].workload.trace_path``.
 
 **TraceReplayGenerator** — per-request timestamps::
 
-    timestamp,function_id
-    0.001,func-a
-    0.003,func-b
+    timestamp
+    0.001
+    0.003
 
 **AggregateTraceGenerator** — request counts per minute::
 
-    minute,function_id,count
-    0,func-a,5
-    1,func-a,10
-    1,func-b,3
+    minute,count
+    0,5
+    1,10
 
 The aggregate generator distributes ``count`` requests evenly within
 each minute (interval = 60 / count).
@@ -41,23 +43,14 @@ if TYPE_CHECKING:
 
 MAX_TRACE_SIZE_MB = 500
 
-# Default column names expected in CSVs
-DEFAULT_TRACE_COLUMNS = {
-    "timestamp": "timestamp",
-    "function_id": "function_id",
-}
-DEFAULT_AGGREGATE_COLUMNS = {
-    "minute": "minute",
-    "function_id": "function_id",
-    "count": "count",
-}
+DEFAULT_TRACE_COLUMNS = {"timestamp": "timestamp"}
+DEFAULT_AGGREGATE_COLUMNS = {"minute": "minute", "count": "count"}
 
 
 @dataclass
 class TraceRecord:
     """One row from the trace CSV."""
     timestamp: float
-    function_id: str
 
 
 class TraceReplayGenerator(BaseGenerator):
@@ -81,7 +74,6 @@ class TraceReplayGenerator(BaseGenerator):
         if not isinstance(scale, int) or scale < 1:
             raise ValueError(f"scale must be positive integer, got {scale!r}")
         self.ctx: SimContext | None = None
-        self._request_counter = 0
         self._start_minute = start_minute
         self._end_minute = end_minute
         self._scale = scale
@@ -103,11 +95,7 @@ class TraceReplayGenerator(BaseGenerator):
         with open(path, "r") as f:
             reader = csv.DictReader(f)
             for row in reader:
-                record = TraceRecord(
-                    timestamp=float(row[c["timestamp"]]),
-                    function_id=row[c["function_id"]],
-                )
-                self._records.append(record)
+                self._records.append(TraceRecord(timestamp=float(row[c["timestamp"]])))
 
         self._records.sort(key=lambda r: r.timestamp)
         self._apply_time_range()
@@ -125,7 +113,6 @@ class TraceReplayGenerator(BaseGenerator):
                 if end_sec is not None and r.timestamp >= end_sec:
                     continue
                 filtered.append(r)
-            # Shift timestamps so start_minute becomes time 0
             offset = start_sec if start_sec is not None else 0.0
             for r in filtered:
                 r.timestamp -= offset
@@ -136,43 +123,20 @@ class TraceReplayGenerator(BaseGenerator):
         self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
 
     def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
-        """Start replay for a specific service (filters records by function_id)."""
-        records = [r for r in self._records if r.function_id == service.service_id]
-        if records:
-            self.ctx.env.process(self._replay_loop(service, records, stop_time))
-
-    def start_all(self, stop_time: float | None = None) -> None:
-        """Start replay for ALL function_ids in the trace (no service filter).
-
-        Use this when trace contains services not declared in config.
-        Each unique function_id gets its own replay process.
-        """
-        by_function: dict[str, list[TraceRecord]] = {}
-        for r in self._records:
-            by_function.setdefault(r.function_id, []).append(r)
-
-        for function_id, records in by_function.items():
-            service = self.ctx.workload_manager.services.get(function_id)
-            if service is None:
-                self.ctx.logger.debug(
-                    "Trace function_id '%s' not in config, skipping %d records",
-                    function_id, len(records),
-                )
-                continue
-            self.ctx.env.process(self._replay_loop(service, records, stop_time))
+        """Start replay for the bound service."""
+        if self._records:
+            self.ctx.env.process(self._replay_loop(service, stop_time))
 
     def _replay_loop(
         self,
         service: ServiceClass,
-        records: list[TraceRecord],
         stop_time: float | None,
     ):
         """SimPy process: emit requests at trace timestamps."""
         ctx = self.ctx
         env = ctx.env
 
-        for record in records:
-            # Wait until the record's timestamp
+        for record in self._records:
             if record.timestamp > env.now:
                 yield env.timeout(record.timestamp - env.now)
 
@@ -196,11 +160,6 @@ class TraceReplayGenerator(BaseGenerator):
         """Total number of records loaded."""
         return len(self._records)
 
-    @property
-    def function_ids(self) -> set[str]:
-        """Unique function_ids in the trace."""
-        return {r.function_id for r in self._records}
-
 
 # ------------------------------------------------------------------
 # Aggregate trace (counts per minute)
@@ -210,7 +169,6 @@ class TraceReplayGenerator(BaseGenerator):
 class AggregateRecord:
     """One row from the aggregate trace CSV."""
     minute: int
-    function_id: str
     count: float
 
 
@@ -219,10 +177,9 @@ class AggregateTraceGenerator(BaseGenerator):
 
     CSV format::
 
-        minute,function_id,count
-        0,func-a,5
-        1,func-a,10
-        1,func-b,3
+        minute,count
+        0,5
+        1,10
 
     For each row, ``count`` requests are distributed evenly within that
     minute (interval = 60 / count).
@@ -241,7 +198,6 @@ class AggregateTraceGenerator(BaseGenerator):
                  start_minute: int | None = None, end_minute: int | None = None,
                  column_map: dict[str, str] | None = None):
         self.ctx: SimContext | None = None
-        self._request_counter = 0
         self._scale = scale
         self._start_minute = start_minute
         self._end_minute = end_minute
@@ -269,12 +225,10 @@ class AggregateTraceGenerator(BaseGenerator):
                 count_val = float(count_raw)
                 if count_val <= 0:
                     continue
-                record = AggregateRecord(
+                self._records.append(AggregateRecord(
                     minute=int(float(row[c["minute"]])),
-                    function_id=row[c["function_id"]],
                     count=count_val,
-                )
-                self._records.append(record)
+                ))
 
         self._records.sort(key=lambda r: r.minute)
         self._apply_time_range()
@@ -289,7 +243,6 @@ class AggregateTraceGenerator(BaseGenerator):
                 if self._end_minute is not None and r.minute >= self._end_minute:
                     continue
                 filtered.append(r)
-            # Shift minutes so start_minute becomes minute 0
             offset = self._start_minute if self._start_minute is not None else 0
             for r in filtered:
                 r.minute -= offset
@@ -300,31 +253,13 @@ class AggregateTraceGenerator(BaseGenerator):
         self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
 
     def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
-        """Start replay for a specific service."""
-        records = [r for r in self._records if r.function_id == service.service_id]
-        if records:
-            self.ctx.env.process(self._replay_loop(service, records, stop_time))
-
-    def start_all(self, stop_time: float | None = None) -> None:
-        """Start replay for ALL function_ids in the trace."""
-        by_function: dict[str, list[AggregateRecord]] = {}
-        for r in self._records:
-            by_function.setdefault(r.function_id, []).append(r)
-
-        for function_id, records in by_function.items():
-            service = self.ctx.workload_manager.services.get(function_id)
-            if service is None:
-                self.ctx.logger.debug(
-                    "Aggregate trace function_id '%s' not in config, skipping",
-                    function_id,
-                )
-                continue
-            self.ctx.env.process(self._replay_loop(service, records, stop_time))
+        """Start replay for the bound service."""
+        if self._records:
+            self.ctx.env.process(self._replay_loop(service, stop_time))
 
     def _replay_loop(
         self,
         service: ServiceClass,
-        records: list[AggregateRecord],
         stop_time: float | None,
     ):
         """SimPy process: distribute requests evenly within each minute.
@@ -337,11 +272,9 @@ class AggregateTraceGenerator(BaseGenerator):
         env = ctx.env
         remainder = 0.0
 
-        for record in records:
+        for record in self._records:
             minute_start = record.minute * self.MINUTE_SECONDS
 
-            # Accumulate fractional count with carry-over
-            # Clamp to 0 to prevent negative values from eating remainder
             remainder += max(0.0, record.count * self._scale)
             emit_count = int(remainder + 1e-9)
             remainder -= emit_count
@@ -390,8 +323,3 @@ class AggregateTraceGenerator(BaseGenerator):
             remainder -= emit
             total += emit
         return total
-
-    @property
-    def function_ids(self) -> set[str]:
-        """Unique function_ids in the trace."""
-        return {r.function_id for r in self._records}

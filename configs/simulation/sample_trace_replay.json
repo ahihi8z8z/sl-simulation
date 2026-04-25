@@ -4,14 +4,13 @@
     "seed": 42,
     "export_mode": 2
   },
-  "workload": {
-    "generator": "trace",
-    "trace_path": "configs/simulation/sample_trace.csv"
-  },
   "services": [
     {
       "service_id": "svc-hello",
-      "arrival_rate": 0,
+      "workload": {
+        "generator": "trace",
+        "trace_path": "configs/simulation/sample_trace.csv"
+      },
       "max_concurrency": 4,
       "min_instances": 1,
       "max_instances": 0,

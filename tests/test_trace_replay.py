@@ -39,13 +39,14 @@ LIFECYCLE_CFG = {
 }
 
 
-def _write_trace(tmpdir, rows):
+def _write_trace(tmpdir, rows, name="trace.csv"):
     """Write a trace CSV and return path."""
-    path = os.path.join(tmpdir, "trace.csv")
+    path = os.path.join(tmpdir, name)
     with open(path, "w") as f:
-        f.write("timestamp,function_id\n")
+        f.write("timestamp\n")
         for row in rows:
-            f.write(",".join(str(v) for v in row) + "\n")
+            ts = row[0] if isinstance(row, tuple) else row
+            f.write(f"{ts}\n")
     return path
 
 
@@ -63,7 +64,7 @@ def _make_config(trace_path=None):
         "service_time": {"mode": "fixed", "duration": 0.1},
     }
     if trace_path:
-        config["workload"] = {
+        config["services"][0]["workload"] = {
             "generator": "trace",
             "trace_path": trace_path,
         }
@@ -97,22 +98,13 @@ def _make_ctx(config, tmpdir):
 class TestTraceReplayGenerator:
     def test_load_records(self):
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [
-            (0.1, "svc-a"),
-            (0.2, "svc-a"),
-            (0.3, "svc-b"),
-        ])
+        path = _write_trace(tmpdir, [(0.1,), (0.2,), (0.3,)])
         gen = TraceReplayGenerator(path)
         assert gen.record_count == 3
-        assert gen.function_ids == {"svc-a", "svc-b"}
 
     def test_records_sorted_by_timestamp(self):
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [
-            (0.5, "svc-a"),
-            (0.1, "svc-a"),
-            (0.3, "svc-a"),
-        ])
+        path = _write_trace(tmpdir, [(0.5,), (0.1,), (0.3,)])
         gen = TraceReplayGenerator(path)
         assert gen._records[0].timestamp == 0.1
         assert gen._records[1].timestamp == 0.3
@@ -120,11 +112,7 @@ class TestTraceReplayGenerator:
 
     def test_replay_creates_requests(self):
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [
-            (0.1, "svc-a"),
-            (0.5, "svc-a"),
-            (1.0, "svc-a"),
-        ])
+        path = _write_trace(tmpdir, [(0.1,), (0.5,), (1.0,)])
         config = _make_config(trace_path=path)
         ctx = _make_ctx(config, tmpdir)
 
@@ -137,12 +125,7 @@ class TestTraceReplayGenerator:
 
     def test_stop_time_respected(self):
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [
-            (0.1, "svc-a"),
-            (0.5, "svc-a"),
-            (2.0, "svc-a"),
-            (3.0, "svc-a"),
-        ])
+        path = _write_trace(tmpdir, [(0.1,), (0.5,), (2.0,), (3.0,)])
         config = _make_config(trace_path=path)
         config["simulation"]["duration"] = 1.0
         ctx = _make_ctx(config, tmpdir)
@@ -153,25 +136,9 @@ class TestTraceReplayGenerator:
 
         assert ctx.request_table.counters.total == 2
 
-    def test_unmatched_function_ids_skipped(self):
-        tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [
-            (0.1, "svc-a"),
-            (0.2, "svc-unknown"),
-            (0.3, "svc-a"),
-        ])
-        config = _make_config(trace_path=path)
-        ctx = _make_ctx(config, tmpdir)
-
-        ctx.cluster_manager.start_all()
-        ctx.workload_manager.start()
-        ctx.env.run(until=5.0)
-
-        assert ctx.request_table.counters.total == 2
-
     def test_service_time_assigned_by_provider(self):
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [(0.1, "svc-a")])
+        path = _write_trace(tmpdir, [(0.1,)])
         config = _make_config(trace_path=path)
         config["service_time"] = {"mode": "fixed", "duration": 0.5}
         ctx = _make_ctx(config, tmpdir)
@@ -222,14 +189,16 @@ class TestConfigSelection:
         config = _make_config()
         ctx = _make_ctx(config, tmpdir)
         from serverless_sim.workload.generators import PoissonFixedSizeGenerator
-        assert isinstance(ctx.workload_manager.generator, PoissonFixedSizeGenerator)
+        gen = ctx.workload_manager.generators["svc-a"]
+        assert isinstance(gen, PoissonFixedSizeGenerator)
 
     def test_trace_generator_from_config(self):
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [(0.1, "svc-a")])
+        path = _write_trace(tmpdir, [(0.1,)])
         config = _make_config(trace_path=path)
         ctx = _make_ctx(config, tmpdir)
-        assert isinstance(ctx.workload_manager.generator, TraceReplayGenerator)
+        gen = ctx.workload_manager.generators["svc-a"]
+        assert isinstance(gen, TraceReplayGenerator)
 
 
 # ------------------------------------------------------------------
@@ -240,10 +209,7 @@ class TestTraceReplayIntegration:
     def test_fixed_service_time_execution(self):
         """All requests should complete with fixed service time."""
         tmpdir = tempfile.mkdtemp()
-        path = _write_trace(tmpdir, [
-            (0.0, "svc-a"),
-            (0.0, "svc-a"),
-        ])
+        path = _write_trace(tmpdir, [(0.0,), (0.0,)])
         config = _make_config(trace_path=path)
         config["service_time"] = {"mode": "fixed", "duration": 0.5}
         ctx = _make_ctx(config, tmpdir)

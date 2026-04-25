@@ -32,3 +32,11 @@ class SimContext:
 
     # Central request store (replaces plain dict for memory efficiency)
     request_table: RequestStore = field(default_factory=RequestStore)
+
+    # Global request counter — shared across all per-service generators so
+    # request IDs stay unique.
+    _request_counter: int = 0
+
+    def next_request_id(self) -> str:
+        self._request_counter += 1
+        return f"req-{self._request_counter}"

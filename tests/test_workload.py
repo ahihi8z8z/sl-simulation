@@ -38,12 +38,12 @@ SAMPLE_CONFIG = {
             "service_id": "svc-a",
             "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
+            "workload": {"arrival_rate": 10.0},
         }
     ],
     "cluster": {
         "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}]
     },
-    "workload": {"arrival_rate": 10.0},
 }
 
 
@@ -221,7 +221,7 @@ class TestAggregateTraceGenerator:
         """Write CSV content to a temp file and return path."""
         fd, path = tempfile.mkstemp(suffix=".csv", prefix="test_agg_")
         with os.fdopen(fd, "w") as f:
-            f.write("minute,function_id,count,duration\n")
+            f.write("minute,count,duration\n")
             for row in rows:
                 f.write(row + "\n")
         return path
@@ -229,8 +229,8 @@ class TestAggregateTraceGenerator:
     def test_total_request_count(self):
         """5 requests in minute 0 + 10 in minute 1 = 15 total."""
         path = self._write_csv([
-            "0,svc-a,5,0.1",
-            "1,svc-a,10,0.1",
+            "0,5,0.1",
+            "1,10,0.1",
         ])
         ctx = _make_ctx(duration=120.0)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
@@ -246,7 +246,7 @@ class TestAggregateTraceGenerator:
     def test_even_spacing_within_minute(self):
         """10 requests in minute 0 → interval = 6s, times at 0, 6, 12, ..., 54."""
         path = self._write_csv([
-            "0,svc-a,10,0.1",
+            "0,10,0.1",
         ])
         ctx = _make_ctx(duration=60.0)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
@@ -266,8 +266,8 @@ class TestAggregateTraceGenerator:
     def test_stop_time_respected(self):
         """Generator stops when stop_time is reached."""
         path = self._write_csv([
-            "0,svc-a,5,0.1",   # interval=12s, times: 0,12,24,36,48
-            "1,svc-a,10,0.1",  # minute 1 = 60s, beyond stop_time=30
+            "0,5,0.1",   # interval=12s, times: 0,12,24,36,48
+            "1,10,0.1",  # minute 1 = 60s, beyond stop_time=30
         ])
         ctx = _make_ctx(duration=30.0)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
@@ -285,8 +285,8 @@ class TestAggregateTraceGenerator:
     def test_zero_count_rows_skipped(self):
         """Rows with count=0 are ignored."""
         path = self._write_csv([
-            "0,svc-a,0,0.1",
-            "1,svc-a,3,0.1",
+            "0,0,0.1",
+            "1,3,0.1",
         ])
         ctx = _make_ctx(duration=120.0)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
@@ -299,21 +299,21 @@ class TestAggregateTraceGenerator:
 
         assert len(ctx.request_table) == 3
 
-    def test_multiple_services(self):
-        """Multiple function_ids in same trace."""
-        path = self._write_csv([
-            "0,svc-a,3,0.1",
-            "0,svc-b,2,0.5",
-        ])
+    def test_multiple_services_separate_files(self):
+        """Per-service architecture: each service has its own generator and file."""
+        path_a = self._write_csv(["0,3,0.1"])
+        path_b = self._write_csv(["0,2,0.5"])
         ctx = _make_ctx(duration=60.0)
         svc_a = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
-        svc_b = ServiceClass(service_id="svc-b",
-                             max_concurrency=1)
+        svc_b = ServiceClass(service_id="svc-b", max_concurrency=1)
 
-        gen = AggregateTraceGenerator(path)
-        gen.attach(ctx)
-        gen.start_for_service(svc_a)
-        gen.start_for_service(svc_b)
+        gen_a = AggregateTraceGenerator(path_a)
+        gen_a.attach(ctx)
+        gen_a.start_for_service(svc_a)
+
+        gen_b = AggregateTraceGenerator(path_b)
+        gen_b.attach(ctx)
+        gen_b.start_for_service(svc_b)
 
         ctx.env.run(until=60.0)
 
