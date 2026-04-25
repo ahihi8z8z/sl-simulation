@@ -17,8 +17,11 @@ service the generator is bound to via
     0,5
     1,10
 
-The aggregate generator distributes ``count`` requests evenly within
-each minute (interval = 60 / count).
+The aggregate generator treats each minute as a homogeneous Poisson
+process with rate ``lambda = count / 60`` (requests per second), so
+inter-arrival times are sampled from ``Exponential(1/lambda)``. The
+realised count per minute therefore varies around ``count`` (Poisson
+distributed).
 
 Service time (execution duration) is NOT set by these generators —
 it is handled by the service_time provider configured separately.
@@ -181,8 +184,11 @@ class AggregateTraceGenerator(BaseGenerator):
         0,5
         1,10
 
-    For each row, ``count`` requests are distributed evenly within that
-    minute (interval = 60 / count).
+    For each row, requests are sampled as a homogeneous Poisson process
+    over that minute with rate ``lambda = count * scale / 60`` (req/s).
+    Inter-arrival times come from ``Exponential(1/lambda)`` using a
+    per-generator RNG spawned from ``ctx.rng`` (reproducible across
+    runs with the same simulation seed).
 
     Parameters
     ----------
@@ -262,31 +268,38 @@ class AggregateTraceGenerator(BaseGenerator):
         service: ServiceClass,
         stop_time: float | None,
     ):
-        """SimPy process: distribute requests evenly within each minute.
+        """SimPy process: sample arrivals as a Poisson process per minute.
 
-        Uses carry-over accumulation for fractional counts so that
-        long-run totals are preserved.  E.g. four consecutive minutes
-        with count=0.3 produce 0, 0, 0, 1 requests respectively.
+        For each record, the arrival rate is ``lambda = count * scale / 60``
+        req/s. Inter-arrival times are drawn from ``Exponential(1/lambda)``
+        using ``self._rng`` (spawned from ``ctx.rng`` at attach time, so
+        independent of other modules' RNG draws).
+
+        At each minute boundary the inter-arrival sampling restarts. By
+        the memoryless property of the exponential distribution this is
+        statistically equivalent to a piecewise-constant-rate Poisson
+        process — the residual time within a minute can be discarded.
         """
         ctx = self.ctx
         env = ctx.env
-        remainder = 0.0
+        rng = self._rng
 
         for record in self._records:
-            minute_start = record.minute * self.MINUTE_SECONDS
-
-            remainder += max(0.0, record.count * self._scale)
-            emit_count = int(remainder + 1e-9)
-            remainder -= emit_count
-
-            if emit_count <= 0:
+            rate = record.count * self._scale / self.MINUTE_SECONDS
+            if rate <= 0.0:
                 continue
 
-            interval = self.MINUTE_SECONDS / emit_count
+            minute_start = record.minute * self.MINUTE_SECONDS
+            mean_interval = 1.0 / rate
+            t_local = 0.0
+            idx = 0
 
-            for i in range(emit_count):
-                target_time = minute_start + i * interval
+            while True:
+                t_local += float(rng.exponential(mean_interval))
+                if t_local >= self.MINUTE_SECONDS:
+                    break
 
+                target_time = minute_start + t_local
                 if target_time > env.now:
                     yield env.timeout(target_time - env.now)
 
@@ -300,26 +313,15 @@ class AggregateTraceGenerator(BaseGenerator):
                 inv = self._make_invocation(ctx, service)
 
                 ctx.logger.debug(
-                    "t=%.3f | AGG_ARRIVE | %s service=%s (minute=%d, %d/%d)",
+                    "t=%.3f | AGG_ARRIVE | %s service=%s (minute=%d, idx=%d, lambda=%.4f)",
                     env.now, inv.request_id, service.service_id,
-                    record.minute, i + 1, emit_count,
+                    record.minute, idx, rate,
                 )
 
                 self._dispatch(ctx, inv)
+                idx += 1
 
     @property
     def record_count(self) -> int:
         """Total number of aggregate records loaded."""
         return len(self._records)
-
-    @property
-    def total_requests(self) -> int:
-        """Total requests that will be generated (after scaling, with carry-over)."""
-        remainder = 0.0
-        total = 0
-        for r in self._records:
-            remainder += max(0.0, r.count * self._scale)
-            emit = int(remainder + 1e-9)
-            remainder -= emit
-            total += emit
-        return total

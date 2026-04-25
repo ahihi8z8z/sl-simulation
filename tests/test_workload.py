@@ -226,28 +226,29 @@ class TestAggregateTraceGenerator:
                 f.write(row + "\n")
         return path
 
-    def test_total_request_count(self):
-        """5 requests in minute 0 + 10 in minute 1 = 15 total."""
-        path = self._write_csv([
-            "0,5,0.1",
-            "1,10,0.1",
-        ])
-        ctx = _make_ctx(duration=120.0)
+    def test_long_run_total_matches_expected_rate(self):
+        """Over many minutes, realised count should be close to expected.
+
+        Expected total = 60 * 100 = 6000 (Poisson, std ≈ 77.5).
+        Allow ±5σ ≈ ±388 for safety.
+        """
+        rows = [f"{m},100,0.1" for m in range(60)]
+        path = self._write_csv(rows)
+        ctx = _make_ctx(duration=3600.0)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
 
         gen = AggregateTraceGenerator(path)
         gen.attach(ctx)
         gen.start_for_service(svc)
 
-        ctx.env.run(until=120.0)
+        ctx.env.run(until=3600.0)
 
-        assert len(ctx.request_table) == 15
+        n = len(ctx.request_table)
+        assert 5600 < n < 6400, f"Expected ~6000 requests, got {n}"
 
-    def test_even_spacing_within_minute(self):
-        """10 requests in minute 0 → interval = 6s, times at 0, 6, 12, ..., 54."""
-        path = self._write_csv([
-            "0,10,0.1",
-        ])
+    def test_within_minute_arrivals_are_poisson(self):
+        """Within a minute, arrivals should be variable-spaced (not deterministic)."""
+        path = self._write_csv(["0,100,0.1"])
         ctx = _make_ctx(duration=60.0)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
 
@@ -258,16 +259,18 @@ class TestAggregateTraceGenerator:
         ctx.env.run(until=60.0)
 
         times = sorted(inv.arrival_time for inv in ctx.request_table.values())
-        assert len(times) == 10
-        # Interval should be 6.0s
-        for i in range(1, len(times)):
-            assert abs(times[i] - times[i - 1] - 6.0) < 0.001
+        assert all(0.0 <= t < 60.0 for t in times)
+        assert len(times) > 50  # Poisson(100) almost never below 50
+
+        # Inter-arrival times must vary — even spacing would give std=0
+        diffs = [times[i] - times[i - 1] for i in range(1, len(times))]
+        assert np.std(diffs) > 0.1, "arrivals appear evenly spaced, not Poisson"
 
     def test_stop_time_respected(self):
-        """Generator stops when stop_time is reached."""
+        """No request should arrive after stop_time."""
         path = self._write_csv([
-            "0,5,0.1",   # interval=12s, times: 0,12,24,36,48
-            "1,10,0.1",  # minute 1 = 60s, beyond stop_time=30
+            "0,30,0.1",
+            "1,30,0.1",
         ])
         ctx = _make_ctx(duration=30.0)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
@@ -278,15 +281,15 @@ class TestAggregateTraceGenerator:
 
         ctx.env.run(until=120.0)
 
-        # stop_time=30 → only requests at t=0,12,24 pass (3 requests)
-        # t=36 exceeds stop_time, minute 1 never starts
-        assert len(ctx.request_table) == 3
+        for inv in ctx.request_table.values():
+            assert inv.arrival_time <= 30.0
 
     def test_zero_count_rows_skipped(self):
-        """Rows with count=0 are ignored."""
+        """Minute 0 with count=0 should produce no arrivals there;
+        all arrivals must come from minute 1's window."""
         path = self._write_csv([
             "0,0,0.1",
-            "1,3,0.1",
+            "1,30,0.1",
         ])
         ctx = _make_ctx(duration=120.0)
         svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
@@ -297,12 +300,13 @@ class TestAggregateTraceGenerator:
 
         ctx.env.run(until=120.0)
 
-        assert len(ctx.request_table) == 3
+        for inv in ctx.request_table.values():
+            assert 60.0 <= inv.arrival_time < 120.0
 
     def test_multiple_services_separate_files(self):
         """Per-service architecture: each service has its own generator and file."""
-        path_a = self._write_csv(["0,3,0.1"])
-        path_b = self._write_csv(["0,2,0.5"])
+        path_a = self._write_csv(["0,30,0.1"])
+        path_b = self._write_csv(["0,20,0.5"])
         ctx = _make_ctx(duration=60.0)
         svc_a = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
         svc_b = ServiceClass(service_id="svc-b", max_concurrency=1)
@@ -320,4 +324,19 @@ class TestAggregateTraceGenerator:
         service_ids = {inv.service_id for inv in ctx.request_table.values()}
         assert "svc-a" in service_ids
         assert "svc-b" in service_ids
-        assert len(ctx.request_table) == 5
+
+    def test_deterministic_with_seed(self):
+        """Same simulation seed → same arrival sequence."""
+        path = self._write_csv([f"{m},20,0.1" for m in range(5)])
+
+        runs = []
+        for _ in range(2):
+            ctx = _make_ctx(duration=300.0, seed=99)
+            svc = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
+            gen = AggregateTraceGenerator(path)
+            gen.attach(ctx)
+            gen.start_for_service(svc)
+            ctx.env.run(until=300.0)
+            runs.append(sorted(inv.arrival_time for inv in ctx.request_table.values()))
+
+        assert runs[0] == runs[1]
