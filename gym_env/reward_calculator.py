@@ -4,11 +4,14 @@ from __future__ import annotations
 class RewardCalculator:
     """Computes reward from request counts and time-averaged cluster utilization.
 
-    Reward = -w_drop * d_dropped
-           - w_cold * d_cold
+    Reward = -w_drop * drop_ratio
+           - w_cold * cold_ratio
            - w_mem  * mem_utilization
            - w_cpu  * cpu_utilization
            - w_lat  * (step_latency_mean / 2.5)
+
+    drop_ratio = d_dropped / d_total, cold_ratio = d_cold / d_total
+    over the step (both 0 when no arrivals).
 
     utilization = d(total_resource_seconds) / (capacity * step_duration),
     i.e. the time-averaged fraction of cluster capacity allocated to
@@ -90,9 +93,12 @@ class RewardCalculator:
         mem_util = (d_total_mem / max_mem_sec) if max_mem_sec > 0 else 0.0
         cpu_util = (d_total_cpu / max_cpu_sec) if max_cpu_sec > 0 else 0.0
 
+        drop_ratio = (d_dropped / d_total) if d_total > 0 else 0.0
+        cold_ratio = (d_cold / d_total) if d_total > 0 else 0.0
+
         reward = (
-            - self.drop_penalty * d_dropped
-            - self.cold_start_penalty * d_cold
+            - self.drop_penalty * drop_ratio
+            - self.cold_start_penalty * cold_ratio
             - self.mem_utilization_penalty * mem_util
             - self.cpu_utilization_penalty * cpu_util
             - self.latency_penalty * (step_latency_mean / 2.5)
@@ -106,6 +112,8 @@ class RewardCalculator:
             "d_completed": d_completed,
             "d_cold": d_cold,
             "d_dropped": d_dropped,
+            "drop_ratio": drop_ratio,
+            "cold_ratio": cold_ratio,
         }
 
         return float(reward)
