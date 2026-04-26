@@ -57,6 +57,16 @@ def _build_generator(workload_cfg: dict) -> BaseGenerator:
             scale_alpha=scale_alpha,
             scale_beta=scale_beta,
         )
+        
+    if gen_type == "weibull":
+        from serverless_sim.workload.generators import WeibullGenerator
+        shape = workload_cfg.get("weibull_shape", 1.0)
+        scale = workload_cfg.get("weibull_scale", 1.0)
+        limit = workload_cfg.get("weibull_limit", 1000)
+        return WeibullGenerator(
+            shape=shape, 
+            scale=scale, 
+            limit=limit)
 
     arrival_rate = workload_cfg.get("arrival_rate", 1.0)
     return PoissonFixedSizeGenerator(arrival_rate=arrival_rate)

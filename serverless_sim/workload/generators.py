@@ -215,3 +215,39 @@ class PoissonFixedSizeGenerator(BaseGenerator):
             inv = self._make_invocation(ctx, service)
             ctx.logger.debug("t=%.3f | ARRIVE | %s service=%s", env.now, inv.request_id, service.service_id)
             self._dispatch(ctx, inv)
+
+class WeibullGenerator(BaseGenerator):
+    """Weibull inter-arrival times."""
+
+    def __init__(self, shape: float = 1.0, scale: float = 1.0, limit: int = 1000):
+        self.ctx: SimContext | None = None
+        self._rng = None
+        self._shape = shape
+        self._scale = scale
+        self._limit = limit
+
+    def attach(self, ctx: SimContext) -> None:
+        self.ctx = ctx
+        self._rng = np.random.default_rng(ctx.rng.spawn(1)[0])
+
+    def start_for_service(self, service: ServiceClass, stop_time: float | None = None) -> None:
+        self.ctx.env.process(self._arrival_loop(service, stop_time))
+
+    def _arrival_loop(self, service: ServiceClass, stop_time: float | None = None):
+        ctx = self.ctx
+        rng = self._rng
+        env = ctx.env
+
+        while True:
+            if stop_time is not None and env.now >= stop_time:
+                return
+
+            interval = rng.weibull(self._shape, self._limit) * self._scale
+            yield env.timeout(interval)
+
+            if stop_time is not None and env.now >= stop_time:
+                return
+
+            inv = self._make_invocation(ctx, service)
+            ctx.logger.debug("t=%.3f | ARRIVE | %s service=%s", env.now, inv.request_id, service.service_id)
+            self._dispatch(ctx, inv)
