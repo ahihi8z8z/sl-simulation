@@ -11,7 +11,6 @@
         "generator": "trace",
         "trace_path": "configs/simulation/sample_trace.csv"
       },
-      "max_concurrency": 4,
       "min_instances": 1,
       "max_instances": 0,
       "lifecycle": {

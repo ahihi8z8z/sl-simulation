@@ -8,7 +8,6 @@
     {
       "service_id": "svc-hello",
       "arrival_rate": 5.0,
-      "max_concurrency": 4,
       "min_instances": 1,
       "max_instances": 0,
       "lifecycle": {

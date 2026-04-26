@@ -42,7 +42,6 @@ CONFIG = {
     "services": [
         {
             "service_id": "svc-a",
-            "max_concurrency": 4,
             "lifecycle": LIFECYCLE_256_1,
             "workload": {"arrival_rate": 5.0},
         }

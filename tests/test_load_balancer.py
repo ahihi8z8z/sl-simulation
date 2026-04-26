@@ -37,7 +37,6 @@ SAMPLE_CONFIG = {
     "services": [
         {
             "service_id": "svc-a",
-            "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
             "workload": {"arrival_rate": 10.0},
         }
@@ -152,3 +151,86 @@ class TestShardingBalancer:
         # All dispatched requests should have a node assigned
         for inv in dispatched:
             assert inv.assigned_node_id is not None
+
+
+class TestSameTickRace:
+    """Regression: many dispatches in the same tick must not all claim one warm slot."""
+
+    def _make_inv(self, ctx, request_id: str) -> Invocation:
+        inv = Invocation(request_id=request_id, service_id="svc-a",
+                         arrival_time=ctx.env.now, status="arrived")
+        inv.service_time = 0.1
+        ctx.request_table[inv.request_id] = inv
+        return inv
+
+    def test_warm_reuse_does_not_double_claim(self):
+        """Pre-create one warm instance; dispatch 500 at the same tick.
+
+        Only 1 should reuse the warm instance synchronously. The remaining
+        499 must take the cold-start path (or be dropped if capacity is
+        exhausted) — none should claim the same warm slot.
+        """
+        ctx = _make_ctx()
+        lb = ShardingContainerPoolBalancer(ctx)
+        ctx.dispatcher = lb
+        # First dispatch creates the instance via cold start; run env so it warms up
+        warmer = self._make_inv(ctx, "warmer")
+        lb.dispatch(warmer)
+        ctx.env.run(until=2.0)
+
+        warm = []
+        for n in ctx.cluster_manager.get_enabled_nodes():
+            warm.extend(
+                i for i in ctx.lifecycle_manager.get_instances_for_node(n.node_id)
+                if i.state == "warm" and i.is_idle
+            )
+        assert len(warm) >= 1
+
+        # Burst dispatch 500 at the same tick (no env.run between)
+        burst = [self._make_inv(ctx, f"burst-{i}") for i in range(500)]
+        for inv in burst:
+            lb.dispatch(inv)
+
+        # Synchronously, at most one invocation per warm instance should have
+        # been assigned to it (start_execution called sync from _dispatch_to_instance).
+        warm_ids = {w.instance_id for w in warm}
+        warm_reuse = [inv for inv in burst if inv.assigned_instance_id in warm_ids]
+        assert len(warm_reuse) <= len(warm), (
+            f"Race: {len(warm_reuse)} invocations claimed {len(warm)} warm slot(s)"
+        )
+
+    def test_promotable_does_not_double_claim(self):
+        """Pre-create one prewarm instance; dispatch many at the same tick.
+
+        Only 1 should claim it via promote. Subsequent same-tick scans must see
+        target_state != None and skip it.
+        """
+        ctx = _make_ctx()
+        lb = ShardingContainerPoolBalancer(ctx)
+        ctx.dispatcher = lb
+
+        # Reach prewarm state by manually creating a prewarm instance via the
+        # cold-start path with target="prewarm".
+        node = ctx.cluster_manager.get_enabled_nodes()[0]
+        ctx.env.process(
+            ctx.lifecycle_manager._cold_start(node, "svc-a", target_state="prewarm")
+        )
+        ctx.env.run(until=1.0)
+
+        promotable = [
+            i for i in ctx.lifecycle_manager.get_instances_for_node(node.node_id)
+            if i.state == "prewarm" and i.target_state is None
+        ]
+        assert len(promotable) == 1
+
+        # Burst dispatch 500 at the same tick
+        burst = [self._make_inv(ctx, f"burst-{i}") for i in range(500)]
+        for inv in burst:
+            lb.dispatch(inv)
+
+        # The prewarm instance must now be in-flight (target_state != None)
+        # so subsequent scans skipped it. Exactly one invocation went via promote.
+        promo_inst = promotable[0]
+        assert promo_inst.target_state is not None, (
+            "Race: promotable instance still claimable after dispatch"
+        )

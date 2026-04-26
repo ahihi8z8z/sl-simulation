@@ -13,7 +13,6 @@ class ServiceClass:
 
     service_id: str = ""
     display_name: str = ""
-    max_concurrency: int = 1
     min_instances: int = 0
     max_instances: int = 0  # 0 = unlimited
 
@@ -62,7 +61,6 @@ class ServiceClass:
         svc = cls(
             service_id=cfg["service_id"],
             display_name=cfg.get("display_name", cfg["service_id"]),
-            max_concurrency=cfg.get("max_concurrency", 1),
             min_instances=cfg.get("min_instances", 0),
             max_instances=cfg.get("max_instances", 0),
             request_cpu=cfg.get("request_cpu", 0.0),

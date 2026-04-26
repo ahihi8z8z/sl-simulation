@@ -55,7 +55,6 @@ def _make_config(trace_path=None):
         "simulation": {"duration": 10.0, "seed": 42},
         "services": [{
             "service_id": "svc-a",
-            "max_concurrency": 4,
             "lifecycle": LIFECYCLE_CFG,
         }],
         "cluster": {

@@ -17,7 +17,6 @@ VALID_CONFIG = {
         {
             "service_id": "svc-a",
             "job_size": 0.1,
-            "max_concurrency": 2,
             "lifecycle": {
                 "cold_start_chain": ["null", "prewarm", "warm"],
                 "states": [

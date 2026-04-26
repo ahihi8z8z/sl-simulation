@@ -21,7 +21,6 @@ def _make_ctx(seed=42):
         "services": [
             {
                 "service_id": "svc-a",
-                "max_concurrency": 4,
                 "lifecycle": {
                     "cold_start_chain": ["null", "prewarm", "warm"],
                     "states": [

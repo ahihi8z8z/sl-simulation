@@ -44,13 +44,11 @@ def _make_config(
     arrival_rate=0.0,
     memory=256,
     cpu=1.0,
-    max_concurrency=4,
     node_memory=8192,
     pool_targets=None,
 ):
     service_cfg = {
         "service_id": "svc-a",
-        "max_concurrency": max_concurrency,
         "min_instances": min_instances,
         "max_instances": max_instances,
         "lifecycle": _make_lifecycle(memory=memory, cpu=cpu),
@@ -196,7 +194,7 @@ class TestMinInstances:
 class TestMaxInstances:
     def test_max_instances_blocks_cold_start(self):
         """max_instances=2, 2 instances exist (each fully occupied), new request -> drop 'max_instances'."""
-        config = _make_config(max_instances=2, min_instances=2, arrival_rate=0.0, max_concurrency=1)
+        config = _make_config(max_instances=2, min_instances=2, arrival_rate=0.0)
         ctx = _make_ctx(config)
         autoscaler = _setup_autoscaler(ctx)
 
@@ -223,7 +221,7 @@ class TestMaxInstances:
             inv.service_time = 100.0  # long job: instance stays running
             ctx.lifecycle_manager.start_execution(inst, inv)
 
-        # Now all instances are running (fully occupied, max_concurrency=1), send another request
+        # Now all instances are running (fully occupied), send another request
         inv_drop = Invocation(
             request_id="r-drop",
             service_id="svc-a",
@@ -260,7 +258,7 @@ class TestMaxInstances:
 
     def test_max_instances_counts_all_states(self):
         """max_instances=3 with 3 instances (all running, fully occupied) -> next request dropped."""
-        config = _make_config(max_instances=3, min_instances=3, arrival_rate=0.0, max_concurrency=1)
+        config = _make_config(max_instances=3, min_instances=3, arrival_rate=0.0)
         ctx = _make_ctx(config)
         autoscaler = _setup_autoscaler(ctx)
 
@@ -273,7 +271,7 @@ class TestMaxInstances:
         total = autoscaler._count_total_instances("svc-a")
         assert total >= 3, f"Expected >= 3 total instances, got {total}"
 
-        # Make all instances running with long jobs (max_concurrency=1, so fully occupied)
+        # Make all instances running with long jobs (1 req/instance, fully occupied)
         warm = [
             i for i in ctx.lifecycle_manager.get_instances_for_node("node-0")
             if i.state == "warm"
@@ -346,7 +344,7 @@ class TestMaxInstances:
 
     def test_max_instances_drop_reason(self):
         """Dropped request has drop_reason='max_instances' (instance fully occupied)."""
-        config = _make_config(max_instances=1, min_instances=1, arrival_rate=0.0, max_concurrency=1)
+        config = _make_config(max_instances=1, min_instances=1, arrival_rate=0.0)
         ctx = _make_ctx(config)
         autoscaler = _setup_autoscaler(ctx)
 
@@ -367,7 +365,7 @@ class TestMaxInstances:
             service_id="svc-a",
             arrival_time=ctx.env.now,
         )
-        inv.service_time = 100.0  # long job: instance stays running (max_concurrency=1, fully occupied)
+        inv.service_time = 100.0  # long job: instance stays running (1 req/instance, fully occupied)
         ctx.lifecycle_manager.start_execution(inst, inv)
 
         # Send another request
@@ -476,7 +474,6 @@ class TestValidation:
 
         cfg = {
             "service_id": "svc-test",
-            "max_concurrency": 1,
             "lifecycle": _make_lifecycle(memory=128, cpu=0.5),
         }
         svc = ServiceClass.from_config(cfg)

@@ -47,7 +47,6 @@ EXTENDED_CONFIG = {
         {
             "service_id": "svc-ext",
             "job_size": 0.1,
-            "max_concurrency": 4,
             "lifecycle": EXTENDED_LIFECYCLE,
             "workload": {"arrival_rate": 3.0},
         }

@@ -46,7 +46,6 @@ SLOW_SERVICE_CONFIG = {
         {
             "service_id": "svc-slow",
             # 2s service time configured via service_time provider
-            "max_concurrency": 1,
             "lifecycle": LIFECYCLE_256_1,
             "workload": {"arrival_rate": 5.0},
         }

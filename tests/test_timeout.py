@@ -36,7 +36,6 @@ QUEUE_LIMIT_CONFIG = {
         {
             "service_id": "svc-flood",
             "job_size": 1.0,
-            "max_concurrency": 1,
             "lifecycle": LIFECYCLE_256_1,
             "workload": {"arrival_rate": 100.0},
         }

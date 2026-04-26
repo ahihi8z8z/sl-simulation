@@ -82,25 +82,6 @@ class LifecycleManager:
     # Find / prepare instances
     # ------------------------------------------------------------------
 
-    def find_reusable_instance(self, node: Node, service_id: str) -> ContainerInstance | None:
-        """Find a reusable instance for this service with available slots.
-
-        Prefers warm instances (no transition cost) but also considers running
-        instances that still have free concurrency slots (max_concurrency > 1).
-        """
-        running_candidate: ContainerInstance | None = None
-        for inst in self._get_instances(node.node_id):
-            if inst.service_id != service_id:
-                continue
-            has_free_slot = inst.active_requests < inst.max_concurrency
-            if not has_free_slot:
-                continue
-            if inst.state == "warm":
-                return inst
-            if inst.state == "running" and running_candidate is None:
-                running_candidate = inst
-        return running_candidate
-
     def find_promotable_instance(self, node: Node, service_id: str) -> ContainerInstance | None:
         """Find the deepest intermediate instance that can be promoted to warm."""
         sm = self._get_sm(service_id)
@@ -133,21 +114,17 @@ class LifecycleManager:
         intermediate_set = set(intermediate)
 
         reusable: ContainerInstance | None = None
-        running_candidate: ContainerInstance | None = None
         promotable: ContainerInstance | None = None
         best_depth = -1
 
         for inst in self._get_instances(node.node_id):
             if inst.service_id != service_id:
                 continue
-            # Reusable check
-            if inst.active_requests < inst.max_concurrency:
-                if inst.state == "warm":
-                    reusable = inst
-                    break  # Best possible — stop early
-                if inst.state == "running" and running_candidate is None:
-                    running_candidate = inst
-            # Promotable check
+            # Reusable check — warm and idle (best possible, stop early)
+            if inst.state == "warm" and inst.active_requests == 0:
+                reusable = inst
+                break
+            # Promotable check — intermediate state, no in-flight transition, idle
             if (inst.state in intermediate_set
                     and inst.target_state is None
                     and inst.is_idle):
@@ -156,7 +133,7 @@ class LifecycleManager:
                     promotable = inst
                     best_depth = depth
 
-        return (reusable or running_candidate, promotable)
+        return (reusable, promotable)
 
     def promote_instance(
         self, node: Node, instance: ContainerInstance,
@@ -216,7 +193,6 @@ class LifecycleManager:
             env=self.ctx.env,
             service_id=service_id,
             node_id=node.node_id,
-            max_concurrency=service.max_concurrency,
         )
         inst.target_state = target_state  # Set immediately for eviction matching
         inst.pool_state = pool_state
@@ -335,27 +311,22 @@ class LifecycleManager:
         # Invalidate any pending idle timer
         instance._idle_timer_gen += 1
 
-        # Only transition resources on first concurrent request
-        if instance.active_requests == 0:
-            self._transition_state(node, instance, "running")
-
-        instance.active_requests += 1
+        self._transition_state(node, instance, "running")
+        instance.active_requests = 1
         invocation.execution_start_time = self.ctx.env.now
         invocation.assigned_instance_id = instance.instance_id
 
     def finish_execution(self, instance: ContainerInstance, invocation: Invocation) -> None:
-        """Release execution, transition back to warm if idle."""
-        instance.active_requests -= 1
+        """Release execution, transition back to warm."""
+        instance.active_requests = 0
         instance.last_used_at = self.ctx.env.now
 
         invocation.execution_end_time = self.ctx.env.now
         invocation.completion_time = self.ctx.env.now
 
-        # If no more active requests, go back to warm and schedule idle check
-        if instance.active_requests == 0:
-            node = self.ctx.cluster_manager.get_node(instance.node_id)
-            self._transition_state(node, instance, "warm")
-            self._schedule_idle_check(instance)
+        node = self.ctx.cluster_manager.get_node(instance.node_id)
+        self._transition_state(node, instance, "warm")
+        self._schedule_idle_check(instance)
 
     def _schedule_idle_check(self, instance: ContainerInstance) -> None:
         """Schedule an idle timeout check for this container."""

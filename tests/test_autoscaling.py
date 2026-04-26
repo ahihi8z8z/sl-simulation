@@ -57,7 +57,6 @@ BASE_CONFIG = {
         {
             "service_id": "svc-a",
             "job_size": 0.1,
-            "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
             "workload": {"arrival_rate": 2.0},
         }

@@ -39,7 +39,6 @@ SAMPLE_CONFIG = {
     "services": [
         {
             "service_id": "svc-a",
-            "max_concurrency": 4,
             "lifecycle": LIFECYCLE_256_1,
             "workload": {"arrival_rate": 5.0},
         }
@@ -97,10 +96,10 @@ class TestStateMachine:
 class TestContainerInstance:
     def test_creation(self):
         env = simpy.Environment()
-        inst = ContainerInstance(env, "svc-a", "node-0", max_concurrency=4)
+        inst = ContainerInstance(env, "svc-a", "node-0")
         assert inst.state == "null"
         assert inst.is_idle
-        assert inst.available_slots == 4
+        assert inst.active_requests == 0
 
 
 class TestLifecycleEndToEnd:
@@ -143,51 +142,6 @@ class TestLifecycleEndToEnd:
         # Some warm hits (completed > cold_starts)
         warm_hits = completed - cold_starts
         assert warm_hits > 0, "Expected some warm hits after first request"
-
-    def test_concurrency(self):
-        """With max_concurrency=4, multiple requests can run on one instance."""
-        config = {
-            "simulation": {"duration": 5.0, "seed": 42, "export_mode": 0},
-            "services": [
-                {
-                    "service_id": "svc-concurrent",
-                    "max_concurrency": 4,
-                    "lifecycle": {
-                        "cold_start_chain": ["null", "prewarm", "warm"],
-                        "states": [
-                            {"name": "null", "category": "stable", "cpu": 0, "memory": 0},
-                            {"name": "prewarm", "category": "stable", "cpu": 0, "memory": 128},
-                            {"name": "warm", "category": "stable", "cpu": 0.1, "memory": 256, "service_bound": True, "reusable": True},
-                            {"name": "running", "category": "transient", "cpu": 0.5, "memory": 256, "service_bound": True, "reusable": False},
-                            {"name": "evicted", "category": "stable", "cpu": 0, "memory": 0, "reusable": False},
-                        ],
-                        "transitions": [
-                            {"from": "null", "to": "prewarm", "time": 0.5},
-                            {"from": "prewarm", "to": "warm", "time": 0.3},
-                            {"from": "warm", "to": "running", "time": 0.0},
-                            {"from": "running", "to": "warm", "time": 0.0},
-                            {"from": "warm", "to": "evicted", "time": 0.0},
-                            {"from": "prewarm", "to": "evicted", "time": 0.0},
-                        ],
-                    },
-                    "workload": {"arrival_rate": 20.0},
-                }
-            ],
-            "cluster": {
-                "nodes": [
-                    {"node_id": "node-0", "cpu_capacity": 16.0, "memory_capacity": 16384},
-                ]
-            },
-        }
-        ctx = _make_ctx(config=config)
-        ctx.cluster_manager.start_all()
-        ctx.workload_manager.start()
-
-        ctx.env.run(until=5.0)
-
-        completed = ctx.request_table.counters.completed
-        # With rate=20 and duration=5, many requests should complete
-        assert completed > 10
 
     def test_per_request_cpu_released(self):
         """After all requests complete, node CPU should be fully released."""

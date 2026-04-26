@@ -8,7 +8,6 @@
     {
       "service_id": "svc-api",
       "arrival_rate": 10.0,
-      "max_concurrency": 8,
       "min_instances": 2,
       "max_instances": 0,
       "autoscaling_defaults": {
@@ -69,7 +68,6 @@
     {
       "service_id": "svc-worker",
       "arrival_rate": 2.0,
-      "max_concurrency": 2,
       "min_instances": 1,
       "max_instances": 0,
       "autoscaling_defaults": {
@@ -119,7 +117,6 @@
     {
       "service_id": "svc-cron",
       "arrival_rate": 0.5,
-      "max_concurrency": 1,
       "min_instances": 0,
       "max_instances": 0,
       "lifecycle": {

@@ -52,7 +52,6 @@ def _make_config(strategy="hash_ring", num_nodes=2):
         "simulation": {"duration": 10.0, "seed": 42},
         "services": [{
             "service_id": "svc-a",
-            "max_concurrency": 4,
             "lifecycle": LIFECYCLE_CFG,
             "workload": {"arrival_rate": 5.0},
         }],

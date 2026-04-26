@@ -282,7 +282,6 @@ class TestSimulationWithCsvModel:
             "simulation": {"duration": 5.0, "seed": 42},
             "services": [{
                 "service_id": "svc-a",
-                "max_concurrency": 4,
                 "lifecycle": lifecycle_with_csv,
                 "workload": {"arrival_rate": 2.0},
             }],
@@ -331,7 +330,6 @@ class TestSimulationWithCsvModel:
             "simulation": {"duration": 10.0, "seed": 42},
             "services": [{
                 "service_id": "svc-a",
-                "max_concurrency": 1,  # force cold start for each request
                 "lifecycle": lifecycle_with_csv,
                 "workload": {"arrival_rate": 5.0},
             }],

@@ -13,7 +13,6 @@
         "trace_path": "configs/simulation/sample_aggregate_trace.csv",
         "scale": 2.0
       },
-      "max_concurrency": 1,
       "min_instances": 0,
       "max_instances": 0,
       "lifecycle": {

@@ -104,18 +104,28 @@ class BaseLoadBalancer:
 
     def _dispatch_to_instance(self, invocation: Invocation, node: Node,
                               instance: ContainerInstance) -> None:
-        """Dispatch to an existing reusable instance."""
+        """Dispatch to an existing reusable instance.
+
+        Calls start_execution synchronously so subsequent same-tick dispatches
+        see active_requests == 1 and skip this instance.
+        """
         invocation.assigned_node_id = node.node_id
         invocation.dispatch_time = self.ctx.env.now
         invocation.status = "dispatched"
+        self.ctx.lifecycle_manager.start_execution(instance, invocation)
         self.ctx.env.process(self._execute(invocation, node, instance))
 
     def _dispatch_promote(self, invocation: Invocation, node: Node,
                           instance: ContainerInstance) -> None:
-        """Promote intermediate instance then execute."""
+        """Promote intermediate instance then execute.
+
+        Synchronously sets target_state = "warm" so subsequent same-tick
+        dispatches see this instance as in-flight and skip it.
+        """
         invocation.assigned_node_id = node.node_id
         invocation.dispatch_time = self.ctx.env.now
         invocation.status = "dispatched"
+        instance.target_state = "warm"
         self.ctx.env.process(self._promote_and_execute(invocation, node, instance))
 
     def _dispatch_cold_start(self, invocation: Invocation, node: Node, service) -> None:
@@ -142,10 +152,9 @@ class BaseLoadBalancer:
 
     def _execute(self, invocation: Invocation, node: Node,
                  instance: ContainerInstance):
-        """SimPy process: execute on pre-claimed slot."""
+        """SimPy process: execute on pre-claimed slot (start_execution called by dispatcher)."""
         lm = self.ctx.lifecycle_manager
 
-        lm.start_execution(instance, invocation)
         invocation.cold_start = False
         yield self.ctx.env.timeout(invocation.service_time)
 

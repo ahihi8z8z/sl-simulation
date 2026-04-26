@@ -10,20 +10,18 @@ _id_counter = itertools.count(1)
 
 
 class ContainerInstance:
-    """Container instance. Concurrency is enforced synchronously via active_requests."""
+    """Container instance. One request at a time; busy state set synchronously at dispatch."""
 
     def __init__(
         self,
         env: simpy.Environment,
         service_id: str,
         node_id: str,
-        max_concurrency: int = 1,
     ):
         self.env = env
         self.instance_id: str = f"inst-{next(_id_counter)}"
         self.service_id: str = service_id
         self.node_id: str = node_id
-        self.max_concurrency: int = max_concurrency
 
         # State tracking
         self.state: str = "null"
@@ -34,7 +32,7 @@ class ContainerInstance:
         self.last_used_at: float = env.now
         self.state_entered_at: float = env.now
 
-        # Request tracking
+        # Request tracking — 0 or 1 (one request per instance)
         self.active_requests: int = 0
 
         # Currently allocated resources on node (for correct release)
@@ -62,13 +60,9 @@ class ContainerInstance:
     def is_pool_container(self) -> bool:
         return self.pool_state is not None
 
-    @property
-    def available_slots(self) -> int:
-        return self.max_concurrency - self.active_requests
-
     def __repr__(self) -> str:
         pool = f", pool={self.pool_state}" if self.pool_state else ""
         return (
             f"ContainerInstance(id={self.instance_id}, service={self.service_id}, "
-            f"state={self.state}, active={self.active_requests}/{self.max_concurrency}{pool})"
+            f"state={self.state}, active={self.active_requests}{pool})"
         )

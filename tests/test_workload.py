@@ -36,7 +36,6 @@ SAMPLE_CONFIG = {
     "services": [
         {
             "service_id": "svc-a",
-            "max_concurrency": 2,
             "lifecycle": LIFECYCLE_256_1,
             "workload": {"arrival_rate": 10.0},
         }
@@ -75,12 +74,10 @@ class TestServiceClass:
         assert svc.service_id == "svc-a"
         assert svc.peak_memory == 256
         assert svc.peak_cpu == 1.0
-        assert svc.max_concurrency == 2
 
     def test_defaults(self):
         cfg = {
             "service_id": "svc-b",
-            "max_concurrency": 1,
             "lifecycle": {
                 "cold_start_chain": ["null", "prewarm", "warm"],
                 "states": [
@@ -191,10 +188,8 @@ class TestWorkloadManager:
     def test_register_multiple_services(self):
         ctx = _make_ctx()
         wm = WorkloadManager(ctx)
-        svc_a = ServiceClass(service_id="svc-a",
-                             max_concurrency=1)
-        svc_b = ServiceClass(service_id="svc-b",
-                             max_concurrency=2)
+        svc_a = ServiceClass(service_id="svc-a")
+        svc_b = ServiceClass(service_id="svc-b")
         wm.register_service(svc_a)
         wm.register_service(svc_b)
         wm.start()
@@ -309,7 +304,7 @@ class TestAggregateTraceGenerator:
         path_b = self._write_csv(["0,20,0.5"])
         ctx = _make_ctx(duration=60.0)
         svc_a = ServiceClass.from_config(SAMPLE_CONFIG["services"][0])
-        svc_b = ServiceClass(service_id="svc-b", max_concurrency=1)
+        svc_b = ServiceClass(service_id="svc-b")
 
         gen_a = AggregateTraceGenerator(path_a)
         gen_a.attach(ctx)
