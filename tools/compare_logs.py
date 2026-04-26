@@ -6,10 +6,10 @@ Each positional arg is a log "group". A group is either:
     infer_all.py) — aggregated as mean (±std on bar plots) across seeds.
 
 Generates:
-  1. comparison_metrics.png    — 2x2: cold/prewarm-hit/drop grouped bar,
-                                 avg latency (latency > 0), memory per
-                                 request (MB·s), avg power. Multi-seed
-                                 groups get std error bars.
+  1. comparison_metrics.png    — 2x2: cold/drop grouped bar, avg latency
+                                 (latency > 0), memory per request (MB·s),
+                                 avg power. Multi-seed groups get std
+                                 error bars.
   2. comparison_containers.png — stacked instances (prewarm/warm/running)
                                  per group (per-hour mean across seeds).
   3. comparison_pool_targets.png — pool_target lines + idle window on twin
@@ -91,11 +91,8 @@ def _seed_scalar_metrics(seed: dict) -> dict:
         latencies = completed["execution_start_time"] - completed["arrival_time"]
         positive = latencies[latencies > 0]
         avg_lat = float(positive.mean() * 1000.0) if len(positive) > 0 else 0.0
-        cold_flag = completed["cold_start"].astype(bool)
-        prewarm_hit = int(((~cold_flag) & (latencies > 1e-6)).sum())
     else:
         avg_lat = 0.0
-        prewarm_hit = 0
 
     mem_per_req = float(eff.get("memory_per_request", 0.0))
 
@@ -107,7 +104,6 @@ def _seed_scalar_metrics(seed: dict) -> dict:
     return {
         "cold_starts": float(r.get("cold_starts", 0)),
         "drops": float(r.get("dropped", 0)),
-        "prewarm_hit": float(prewarm_hit),
         "avg_lat": avg_lat,
         "mem_per_req": mem_per_req,
         "power": power,
@@ -127,21 +123,18 @@ def _aggregate_group(group: dict, keys: list[str]) -> dict[str, tuple[float, flo
 def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> None:
     """2x2 bar plot with mean±std across seeds per group.
 
-    Panel (0,0): grouped bars for cold starts / prewarm hits / drops per
-    group. Prewarm-hit = completed requests that were not cold-starts
-    but had arrival→execution latency > 0 (queue waits on warm pool).
+    Panel (0,0): grouped bars for cold starts / drops per group.
     Panel (0,1): mean positive latency (ms).
     Panel (1,0): memory-seconds per request from summary (MB·s).
     Panel (1,1): mean cluster power (W).
     """
-    keys = ["cold_starts", "drops", "prewarm_hit", "avg_lat", "mem_per_req", "power"]
+    keys = ["cold_starts", "drops", "avg_lat", "mem_per_req", "power"]
     agg = [_aggregate_group(g, keys) for g in groups]
 
     def vals(k): return [a[k][0] for a in agg], [a[k][1] for a in agg]
 
     cold_m, cold_s = vals("cold_starts")
     drop_m, drop_s = vals("drops")
-    pw_m, pw_s     = vals("prewarm_hit")
     lat_m, lat_s   = vals("avg_lat")
     mem_m, mem_s   = vals("mem_per_req")
     pwr_m, pwr_s   = vals("power")
@@ -151,28 +144,23 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> 
     colors = [COLORS[i % len(COLORS)] for i in range(n_runs)]
     x = np.arange(n_runs)
 
-    # (0,0) grouped bar: cold starts / prewarm hits / drops
+    # (0,0) grouped bar: cold starts / drops
     ax = axes[0, 0]
-    w = 0.27
-    bars_c = ax.bar(x - w, cold_m, w, yerr=cold_s, color=colors, alpha=0.85,
+    w = 0.4
+    bars_c = ax.bar(x - w / 2, cold_m, w, yerr=cold_s, color=colors, alpha=0.85,
                     edgecolor="black", linewidth=0.5, capsize=3,
                     error_kw={"elinewidth": 0.8})
-    bars_p = ax.bar(x,     pw_m,   w, yerr=pw_s,   color=colors, alpha=0.85,
-                    edgecolor="black", linewidth=0.5, hatch="..", capsize=3,
-                    error_kw={"elinewidth": 0.8})
-    bars_d = ax.bar(x + w, drop_m, w, yerr=drop_s, color=colors, alpha=0.85,
+    bars_d = ax.bar(x + w / 2, drop_m, w, yerr=drop_s, color=colors, alpha=0.85,
                     edgecolor="black", linewidth=0.5, hatch="//", capsize=3,
                     error_kw={"elinewidth": 0.8})
     ax.bar_label(bars_c, fmt="%.0f", fontsize=7)
-    ax.bar_label(bars_p, fmt="%.0f", fontsize=7)
     ax.bar_label(bars_d, fmt="%.0f", fontsize=7)
-    ax.set_title("Cold / Pre-warm hit / Dropped (requests)", fontsize=11)
+    ax.set_title("Cold / Dropped (requests)", fontsize=11)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=8)
     from matplotlib.patches import Patch
     legend_handles = [
         Patch(facecolor="lightgray", edgecolor="black", label="Cold Start"),
-        Patch(facecolor="lightgray", edgecolor="black", hatch="..", label="Pre-warm hit"),
         Patch(facecolor="lightgray", edgecolor="black", hatch="//", label="Dropped"),
     ]
     ax.legend(handles=legend_handles, fontsize=8)
