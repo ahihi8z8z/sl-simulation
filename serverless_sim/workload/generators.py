@@ -237,12 +237,18 @@ class WeibullGenerator(BaseGenerator):
         ctx = self.ctx
         rng = self._rng
         env = ctx.env
+        intervals = rng.weibull(self._shape, self._limit) * self._scale
+        count = 0
 
         while True:
             if stop_time is not None and env.now >= stop_time:
                 return
+            if count >= self._limit:
+                return
 
-            interval = rng.weibull(self._shape, self._limit) * self._scale
+            interval = intervals[count]
+            count += 1
+
             yield env.timeout(interval)
 
             if stop_time is not None and env.now >= stop_time:
