@@ -7,9 +7,9 @@ Each positional arg is a log "group". A group is either:
 
 Generates:
   1. comparison_metrics.png    — 2x2: cold/drop grouped bar, avg latency
-                                 (latency > 0), memory per request (MB·s),
-                                 avg power. Multi-seed groups get std
-                                 error bars.
+                                 (over all completed), memory per request
+                                 (MB·s), avg power. Multi-seed groups get
+                                 std error bars.
   2. comparison_containers.png — stacked instances (prewarm/warm/running)
                                  per group (per-hour mean across seeds).
   3. comparison_pool_targets.png — pool_target lines + idle window on twin
@@ -89,8 +89,7 @@ def _seed_scalar_metrics(seed: dict) -> dict:
     if trace is not None and len(trace) > 0:
         completed = trace[trace["status"] == "completed"]
         latencies = completed["execution_start_time"] - completed["arrival_time"]
-        positive = latencies[latencies > 0]
-        avg_lat = float(positive.mean() * 1000.0) if len(positive) > 0 else 0.0
+        avg_lat = float(latencies.mean() * 1000.0) if len(latencies) > 0 else 0.0
     else:
         avg_lat = 0.0
 
@@ -124,7 +123,7 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> 
     """2x2 bar plot with mean±std across seeds per group.
 
     Panel (0,0): grouped bars for cold starts / drops per group.
-    Panel (0,1): mean positive latency (ms).
+    Panel (0,1): mean latency over all completed requests (ms).
     Panel (1,0): memory-seconds per request from summary (MB·s).
     Panel (1,1): mean cluster power (W).
     """
