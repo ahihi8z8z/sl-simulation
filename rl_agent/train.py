@@ -180,6 +180,14 @@ def run_training(
         model_kwargs["n_epochs"] = rl_config.get("n_epochs", 10)
         model_kwargs["clip_range"] = rl_config.get("clip_range", 0.2)
 
+    # RecurrentPPO: LSTM/policy flags
+    if algo_name == "recurrent_ppo":
+        pk = (model_kwargs.get("policy_kwargs") or {}).copy()
+        pk["lstm_hidden_size"]   = rl_config.get("lstm_hidden_size", 64)
+        pk["enable_critic_lstm"] = rl_config.get("enable_critic_lstm", True)
+        pk["ortho_init"]         = rl_config.get("ortho_init", False)
+        model_kwargs["policy_kwargs"] = pk
+
     # DQN-specific params
     if algo_name == "dqn":
         model_kwargs["buffer_size"] = rl_config.get("buffer_size", 100000)
