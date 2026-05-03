@@ -187,27 +187,49 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> 
     print(f"  Saved: comparison_metrics.png")
 
 
-def _hourly_mean_across_seeds(seeds: list[dict], columns: list[str]) -> pd.DataFrame | None:
-    """Resample each seed's metrics to hourly, align on shared hours, then
-    mean across seeds. Returns a DataFrame indexed by hour with the given
-    columns (missing columns dropped per seed, then averaged across seeds
-    that have them)."""
+def _pick_bucket(seeds: list[dict]) -> tuple[float, str]:
+    """Auto-pick a bucket size based on the longest seed's time span.
+
+    Returns (bucket_seconds, x_unit_label).
+    Heuristic: aim for ~30-300 buckets so plots have visible resolution.
+    """
+    max_span = 0.0
+    for s in seeds:
+        m = s.get("metrics")
+        if m is None or len(m) == 0:
+            continue
+        max_span = max(max_span, float(m["time"].max() - m["time"].min()))
+    if max_span >= 7200:        # >= 2h → bucket = 1h
+        return 3600.0, "hours"
+    if max_span >= 120:         # >= 2min → bucket = 1min
+        return 60.0, "minutes"
+    return 1.0, "seconds"        # very short sims
+
+
+def _hourly_mean_across_seeds(seeds: list[dict], columns: list[str]) -> tuple[pd.DataFrame, str] | None:
+    """Resample each seed's metrics into time buckets (auto-sized to the run
+    length), align on shared bucket index, then mean across seeds.
+
+    Returns (DataFrame indexed by bucket center in the chosen unit,
+             x-axis unit label) — or None if no usable data.
+    """
+    bucket_sec, unit = _pick_bucket(seeds)
     per_seed: list[pd.DataFrame] = []
     for s in seeds:
         m = s.get("metrics")
         if m is None or len(m) == 0:
             continue
         m = m.copy()
-        m["_hour"] = (m["time"] / 3600.0).astype(int)
-        hourly = m.groupby("_hour").mean(numeric_only=True)
-        keep = [c for c in columns if c in hourly.columns]
+        m["_bucket"] = (m["time"] / bucket_sec).astype(int)
+        binned = m.groupby("_bucket").mean(numeric_only=True)
+        keep = [c for c in columns if c in binned.columns]
         if keep:
-            per_seed.append(hourly[keep])
+            per_seed.append(binned[keep])
     if not per_seed:
         return None
-    # Align on union of hours, mean across seeds (NaN-safe)
+    # Align on union of buckets, mean across seeds (NaN-safe)
     stacked = pd.concat(per_seed, axis=0)
-    return stacked.groupby(stacked.index).mean()
+    return stacked.groupby(stacked.index).mean(), unit
 
 
 def plot_container_comparison(groups: list[dict], labels: list[str], output_dir: str,
@@ -221,11 +243,13 @@ def plot_container_comparison(groups: list[dict], labels: list[str], output_dir:
     state_colors = {"prewarm": "#2196F3", "warm": "#F44336", "running": "#FF9800"}
     state_cols = [f"lifecycle.instances_{s}" for s in ("prewarm", "warm", "running")]
     _legend_handles, _legend_labels = [], []
+    x_unit = "hours"
 
     for ax, group, label in zip(axes, groups, labels):
-        hourly = _hourly_mean_across_seeds(group["seeds"], state_cols)
-        if hourly is None:
+        result = _hourly_mean_across_seeds(group["seeds"], state_cols)
+        if result is None:
             continue
+        hourly, x_unit = result
 
         time_hours = hourly.index.values.astype(float)
         states, values_list, colors = [], [], []
@@ -246,7 +270,7 @@ def plot_container_comparison(groups: list[dict], labels: list[str], output_dir:
             _legend_handles, _legend_labels = ax.get_legend_handles_labels()
         ax.grid(alpha=0.3)
 
-    axes[-1].set_xlabel("Time (hours)")
+    axes[-1].set_xlabel(f"Time ({x_unit})")
 
     if _legend_handles:
         fig.legend(_legend_handles, _legend_labels, loc="upper center",
@@ -268,6 +292,7 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str) ->
         axes = [axes]
 
     _legend_handles, _legend_labels = [], []
+    x_unit = "hours"
 
     for ax, group, label in zip(axes, groups, labels):
         # Discover available columns from any seed's metrics
@@ -286,9 +311,10 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str) ->
         idle_col = next((c for c in all_cols if "idle_timeout" in c), None)
 
         wanted = list(target_cols.values()) + ([idle_col] if idle_col else [])
-        hourly = _hourly_mean_across_seeds(group["seeds"], wanted)
-        if hourly is None:
+        result = _hourly_mean_across_seeds(group["seeds"], wanted)
+        if result is None:
             continue
+        hourly, x_unit = result
         time_hours = hourly.index.values.astype(float)
 
         # min_instances from first seed's summary (configuration, not seed-dependent)
@@ -330,7 +356,7 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str) ->
                 _legend_labels = labels1
         ax.grid(alpha=0.3)
 
-    axes[-1].set_xlabel("Time (hours)")
+    axes[-1].set_xlabel(f"Time ({x_unit})")
 
     if _legend_handles:
         fig.legend(_legend_handles, _legend_labels, loc="upper center",

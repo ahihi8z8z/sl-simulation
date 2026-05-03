@@ -129,6 +129,12 @@ class ServerlessEnv(gym.Env):
         self._engine.setup()
         ctx.workload_manager.start()
 
+        # Warmup phase: traffic flows from t=0 under the autoscaler's config
+        # defaults; the agent only takes over after start_delay seconds.
+        start_delay = float(self.sim_config["simulation"].get("start_delay", 0) or 0)
+        if start_delay > 0:
+            ctx.env.run(until=start_delay)
+
         self._monitor_api = MonitorAPI(ctx.monitor_manager)
         if ctx.autoscaling_manager:
             self._autoscaling_api = AutoscalingAPI(ctx.autoscaling_manager)
