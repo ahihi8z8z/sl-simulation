@@ -40,6 +40,7 @@ class ServerlessEnv(gym.Env):
         delta_max                : int   (default 0; if >0, pool actions are deltas)
         flatten_action           : bool  (default False)
         continuous_action        : bool  (default False; uses softmax mapper)
+        control_idle_timeout     : bool  (default True; False → drop idle dim)
         pool_states              : list  (optional override; else discovered from autoscaler)
         observation_metrics      : list  (optional)
         reward                   : dict  (optional; see RewardCalculator)
@@ -164,6 +165,7 @@ class ServerlessEnv(gym.Env):
             idle_timeout_max_minutes=self.gym_config.get("idle_timeout_max_minutes", 10),
             delta_max=self.gym_config.get("delta_max", 0),
             softmax=self.continuous_action,
+            control_idle_timeout=self.gym_config.get("control_idle_timeout", True),
         )
 
         reward_cfg = self.gym_config.get("reward", {})
