@@ -25,15 +25,25 @@ from gym_env.random_start import apply_random_start_minute
 from gym_env.reward_calculator import RewardCalculator
 
 
-class MultiDiscreteEnv(gym.Env):
-    """Gymnasium env with MultiDiscrete action space.
+class ServerlessEnv(gym.Env):
+    """Gymnasium environment for serverless autoscaling.
+
+    Action space depends on gym_config:
+      - default            : MultiDiscrete  (one dim per pool state + idle_timeout)
+      - flatten_action     : Discrete       (flat product of MultiDiscrete dims)
+      - continuous_action  : Box [-1, 1]    (softmax over pool states)
 
     Config (gym_config_path JSON):
-        max_steps              : int (default 200)
-        pool_target_max        : int (default 10)
-        idle_timeout_max_minutes : int (default 10)
-        observation_metrics    : list[str] (optional)
-        reward                 : dict (optional, same as RewardCalculator)
+        max_steps                : int   (default 200)
+        pool_target_max          : int   (default 10)
+        idle_timeout_max_minutes : int   (default 10)
+        delta_max                : int   (default 0; if >0, pool actions are deltas)
+        flatten_action           : bool  (default False)
+        continuous_action        : bool  (default False; uses softmax mapper)
+        pool_states              : list  (optional override; else discovered from autoscaler)
+        observation_metrics      : list  (optional)
+        reward                   : dict  (optional; see RewardCalculator)
+        random_start_minute      : dict  (optional; see gym_env.random_start)
     """
 
     metadata = {"render_modes": []}

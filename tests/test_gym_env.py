@@ -1,16 +1,16 @@
-"""Unit tests for Step 14: Gymnasium wrapper."""
+"""Unit tests for the unified ServerlessEnv gym wrapper."""
 
 import numpy as np
-from gym_env.serverless_gym_env import ServerlessGymEnv
+from gym_env.serverless_env import ServerlessEnv
 
 
 SIM_CONFIG = "configs/simulation/sample_minimal.json"
 GYM_CONFIG = "configs/gym/sample_gym_discrete.json"
 
 
-class TestServerlessGymEnv:
+class TestServerlessEnv:
     def test_reset(self):
-        env = ServerlessGymEnv(SIM_CONFIG, GYM_CONFIG)
+        env = ServerlessEnv(SIM_CONFIG, GYM_CONFIG)
         obs, info = env.reset()
         assert isinstance(obs, np.ndarray)
         assert obs.shape == (env.observation_space.shape[0],)
@@ -18,7 +18,7 @@ class TestServerlessGymEnv:
         env.close()
 
     def test_step(self):
-        env = ServerlessGymEnv(SIM_CONFIG, GYM_CONFIG)
+        env = ServerlessEnv(SIM_CONFIG, GYM_CONFIG)
         obs, info = env.reset()
         action = env.action_space.sample()
         obs2, reward, terminated, truncated, info2 = env.step(action)
@@ -29,7 +29,7 @@ class TestServerlessGymEnv:
         env.close()
 
     def test_multiple_steps(self):
-        env = ServerlessGymEnv(SIM_CONFIG, GYM_CONFIG)
+        env = ServerlessEnv(SIM_CONFIG, GYM_CONFIG)
         obs, _ = env.reset()
         for _ in range(10):
             action = env.action_space.sample()
@@ -40,7 +40,7 @@ class TestServerlessGymEnv:
         env.close()
 
     def test_observation_shape_consistent(self):
-        env = ServerlessGymEnv(SIM_CONFIG, GYM_CONFIG)
+        env = ServerlessEnv(SIM_CONFIG, GYM_CONFIG)
         obs, _ = env.reset()
         expected_shape = env.observation_space.shape
         assert obs.shape == expected_shape
@@ -51,12 +51,12 @@ class TestServerlessGymEnv:
         env.close()
 
     def test_truncation_at_max_steps(self):
-        """Env should truncate after max_steps."""
-        env = ServerlessGymEnv(SIM_CONFIG, GYM_CONFIG)
+        env = ServerlessEnv(SIM_CONFIG, GYM_CONFIG)
         env.reset()
         truncated = False
         for i in range(env.max_steps + 5):
-            _, _, terminated, truncated, _ = env.step(0)
+            action = env.action_space.sample()
+            _, _, terminated, truncated, _ = env.step(action)
             if truncated or terminated:
                 break
         assert truncated

@@ -83,9 +83,8 @@ def _make_env(env_class, sim_config_path: str, gym_config_path: str, seed: int):
 
 
 def make_env(sim_config_path: str, gym_config_path: str, seed: int):
-    """Backward-compatible: creates ServerlessGymEnv."""
-    from gym_env.serverless_gym_env import ServerlessGymEnv
-    return _make_env(ServerlessGymEnv, sim_config_path, gym_config_path, seed)
+    from gym_env.serverless_env import ServerlessEnv
+    return _make_env(ServerlessEnv, sim_config_path, gym_config_path, seed)
 
 
 def run_training(
@@ -102,7 +101,7 @@ def run_training(
         rl_config = json.load(f)
 
     algo_name = rl_config.get("algorithm", "ppo").lower()
-    env_type = rl_config.get("env", "discrete")
+    env_type = rl_config.get("env", "serverless")
     n_envs = rl_config.get("n_envs", 4)
     total_timesteps = rl_config.get("total_timesteps", 10000)
     use_subproc = rl_config.get("use_subproc", False)
@@ -113,12 +112,9 @@ def run_training(
     if env_type == "vahidinia":
         from gym_env.vahidinia_env import VahidiniaEnv
         env_class = VahidiniaEnv
-    elif env_type == "multi_discrete":
-        from gym_env.multi_discrete_env import MultiDiscreteEnv
-        env_class = MultiDiscreteEnv
     else:
-        from gym_env.serverless_gym_env import ServerlessGymEnv
-        env_class = ServerlessGymEnv
+        from gym_env.serverless_env import ServerlessEnv
+        env_class = ServerlessEnv
 
     # Select algorithm
     algo_cls = ALGORITHMS.get(algo_name)

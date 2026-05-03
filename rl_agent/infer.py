@@ -49,12 +49,9 @@ def run_inference(
     if env_type == "vahidinia":
         from gym_env.vahidinia_env import VahidiniaEnv
         env_class = VahidiniaEnv
-    elif env_type == "multi_discrete":
-        from gym_env.multi_discrete_env import MultiDiscreteEnv
-        env_class = MultiDiscreteEnv
     else:
-        from gym_env.serverless_gym_env import ServerlessGymEnv
-        env_class = ServerlessGymEnv
+        from gym_env.serverless_env import ServerlessEnv
+        env_class = ServerlessEnv
 
     # Load model
     algo_cls = ALGORITHMS.get(algo_name)

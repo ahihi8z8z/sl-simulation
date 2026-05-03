@@ -1,7 +1,8 @@
 {
   "max_steps": 50,
-  "prewarm_max": 10,
-  "idle_timeout_max": 120.0,
+  "pool_target_max": 10,
+  "idle_timeout_max_minutes": 10,
+  "flatten_action": true,
   "reward": {
     "drop_penalty": 1.0,
     "cold_start_penalty": 0.1,

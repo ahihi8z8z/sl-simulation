@@ -1,8 +1,8 @@
-"""Unit tests for Step 15: VecEnv compatibility."""
+"""Unit tests for VecEnv compatibility."""
 
 import numpy as np
 from stable_baselines3.common.vec_env import DummyVecEnv, SubprocVecEnv
-from gym_env.serverless_gym_env import ServerlessGymEnv
+from gym_env.serverless_env import ServerlessEnv
 
 
 SIM_CONFIG = "configs/simulation/sample_minimal.json"
@@ -12,7 +12,7 @@ GYM_CONFIG = "configs/gym/sample_gym_discrete.json"
 def make_env(seed: int):
     """Factory function for creating gym envs with unique seeds."""
     def _init():
-        return ServerlessGymEnv(SIM_CONFIG, GYM_CONFIG, seed=seed)
+        return ServerlessEnv(SIM_CONFIG, GYM_CONFIG, seed=seed)
     return _init
 
 
@@ -21,7 +21,7 @@ class TestDummyVecEnv:
         env = DummyVecEnv([make_env(i) for i in range(4)])
         obs = env.reset()
         assert obs.shape[0] == 4
-        actions = [0, 0, 0, 0]
+        actions = [env.action_space.sample() for _ in range(4)]
         obs2, rewards, dones, infos = env.step(actions)
         assert obs2.shape[0] == 4
         assert len(rewards) == 4
@@ -31,7 +31,8 @@ class TestDummyVecEnv:
         env = DummyVecEnv([make_env(i) for i in range(2)])
         obs = env.reset()
         for _ in range(3):
-            obs, _, _, _ = env.step([0, 0])
+            actions = [env.action_space.sample() for _ in range(2)]
+            obs, _, _, _ = env.step(actions)
             assert obs.shape[0] == 2
             assert obs.shape[1] == env.observation_space.shape[0]
         env.close()
@@ -42,7 +43,7 @@ class TestSubprocVecEnv:
         env = SubprocVecEnv([make_env(i + 100) for i in range(2)])
         obs = env.reset()
         assert obs.shape[0] == 2
-        actions = [0, 0]
+        actions = [env.action_space.sample() for _ in range(2)]
         obs2, rewards, dones, infos = env.step(actions)
         assert obs2.shape[0] == 2
         assert len(rewards) == 2
@@ -54,6 +55,6 @@ class TestSubprocVecEnv:
         obs = env.reset()
         # After a few steps, observations should differ (different seeds)
         for _ in range(5):
-            obs, _, _, _ = env.step([0, 0])
-        # Not strictly guaranteed to differ on every step, but likely
+            actions = [env.action_space.sample() for _ in range(2)]
+            obs, _, _, _ = env.step(actions)
         env.close()
