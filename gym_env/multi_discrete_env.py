@@ -21,6 +21,7 @@ from serverless_sim.autoscaling.autoscaling_api import AutoscalingAPI
 from serverless_sim.monitoring.monitor_api import MonitorAPI
 from gym_env.observation_builder import ObservationBuilder
 from gym_env.multi_action_mapper import MultiActionMapper
+from gym_env.random_start import apply_random_start_minute
 from gym_env.reward_calculator import RewardCalculator
 
 
@@ -160,13 +161,20 @@ class MultiDiscreteEnv(gym.Env):
             # Random seed each episode for variation in transition sampling
             self.sim_config["simulation"]["seed"] = int(self.np_random.integers(0, 2**31))
 
+        chosen_start = apply_random_start_minute(
+            self.sim_config, self.gym_config, self.np_random
+        )
+
         self._build()
         self._current_step = 0
         self._reward_calc.reset()
 
         snapshot = self._get_snapshot()
         obs = self._obs_builder.build(snapshot)
-        return obs, {"snapshot": snapshot, "step": 0}
+        info = {"snapshot": snapshot, "step": 0}
+        if chosen_start is not None:
+            info["start_minute"] = chosen_start
+        return obs, info
 
     def step(self, action: np.ndarray):
         self._current_step += 1

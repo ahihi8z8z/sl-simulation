@@ -14,6 +14,7 @@ from serverless_sim.autoscaling.autoscaling_api import AutoscalingAPI
 from serverless_sim.monitoring.monitor_api import MonitorAPI
 from gym_env.observation_builder import ObservationBuilder
 from gym_env.action_mapper import ActionMapper
+from gym_env.random_start import apply_random_start_minute
 from gym_env.reward_calculator import RewardCalculator
 
 
@@ -115,6 +116,10 @@ class ServerlessGymEnv(gym.Env):
         if seed is not None:
             self.sim_config["simulation"]["seed"] = seed
 
+        chosen_start = apply_random_start_minute(
+            self.sim_config, self.gym_config, self.np_random
+        )
+
         self._build()
         self._current_step = 0
         self._reward_calc.reset()
@@ -123,6 +128,8 @@ class ServerlessGymEnv(gym.Env):
         snapshot = self._get_snapshot()
         obs = self._obs_builder.build(snapshot)
         info = {"snapshot": snapshot, "step": 0}
+        if chosen_start is not None:
+            info["start_minute"] = chosen_start
         return obs, info
 
     def step(self, action: int):
