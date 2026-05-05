@@ -220,3 +220,5 @@ logs/
 *.csv
 experimental/
 paper/
+*.txt
+DRe-SCale/
