@@ -8,8 +8,8 @@ Each positional arg is a log "group". A group is either:
 Generates:
   1. comparison_metrics.png    — 2x2: cold/drop grouped bar, avg latency
                                  (over all completed), memory per request
-                                 (MB·s), avg power. Multi-seed groups get
-                                 std error bars.
+                                 (MB·s), energy per request (J). Multi-seed
+                                 groups get std error bars.
   2. comparison_containers.png — stacked instances (prewarm/warm/running)
                                  per group (per-hour mean across seeds).
   3. comparison_pool_targets.png — pool_target lines + idle window on twin
@@ -95,17 +95,27 @@ def _seed_scalar_metrics(seed: dict) -> dict:
 
     mem_per_req = float(eff.get("memory_per_request", 0.0))
 
+    # Energy per completed request (J/req): integrate cluster.power over the
+    # run, divide by completed count. Approximated as mean(power) * duration.
     metrics_csv = seed.get("metrics")
-    power = (float(metrics_csv["cluster.power"].mean())
-             if metrics_csv is not None and "cluster.power" in metrics_csv.columns
-             else 0.0)
+    power_per_req = 0.0
+    if (metrics_csv is not None
+            and "cluster.power" in metrics_csv.columns
+            and "time" in metrics_csv.columns
+            and len(metrics_csv) > 1):
+        completed_n = float(r.get("completed", 0))
+        if completed_n > 0:
+            mean_w = float(pd.to_numeric(metrics_csv["cluster.power"], errors="coerce").mean())
+            t = pd.to_numeric(metrics_csv["time"], errors="coerce")
+            duration = float(t.max() - t.min())
+            power_per_req = mean_w * duration / completed_n
 
     return {
         "cold_starts": float(r.get("cold_starts", 0)),
         "drops": float(r.get("dropped", 0)),
         "avg_lat": avg_lat,
         "mem_per_req": mem_per_req,
-        "power": power,
+        "power_per_req": power_per_req,
     }
 
 
@@ -127,7 +137,7 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> 
     Panel (1,0): memory-seconds per request from summary (MB·s).
     Panel (1,1): mean cluster power (W).
     """
-    keys = ["cold_starts", "drops", "avg_lat", "mem_per_req", "power"]
+    keys = ["cold_starts", "drops", "avg_lat", "mem_per_req", "power_per_req"]
     agg = [_aggregate_group(g, keys) for g in groups]
 
     def vals(k): return [a[k][0] for a in agg], [a[k][1] for a in agg]
@@ -136,7 +146,7 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> 
     drop_m, drop_s = vals("drops")
     lat_m, lat_s   = vals("avg_lat")
     mem_m, mem_s   = vals("mem_per_req")
-    pwr_m, pwr_s   = vals("power")
+    pwr_m, pwr_s   = vals("power_per_req")
 
     n_runs = len(labels)
     fig, axes = plt.subplots(2, 2, figsize=(max(10, n_runs * 1.5 + 6), 8))
@@ -169,7 +179,7 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> 
     for ax, means, stds, title, fmt in [
         (axes[0, 1], lat_m, lat_s, "Avg Latency (ms)", "%.1f"),
         (axes[1, 0], mem_m, mem_s, "Memory per request (MB·s)", "%.0f"),
-        (axes[1, 1], pwr_m, pwr_s, "Avg Power (W)", "%.1f"),
+        (axes[1, 1], pwr_m, pwr_s, "Energy per request (J)", "%.2f"),
     ]:
         bars = ax.bar(x, means, width=0.7, yerr=stds, color=colors, alpha=0.85,
                       capsize=4, error_kw={"elinewidth": 0.9})

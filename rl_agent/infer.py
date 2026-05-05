@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 import os
 
@@ -100,6 +101,7 @@ def run_inference(
 
         episode_reward = 0.0
         step_count = 0
+        reward_log: list[dict] = []
 
         use_masks = algo_name == "maskable_ppo" and hasattr(env, "action_masks")
 
@@ -111,16 +113,37 @@ def run_inference(
                 action, _ = model.predict(obs, deterministic=deterministic)
             if has_vec_norm:
                 obs, reward, done, info = vec_env.step(action)
-                episode_reward += reward[0]
+                step_reward = float(reward[0])
+                step_info = info[0] if isinstance(info, (list, tuple)) else info
+                episode_reward += step_reward
                 step_count += 1
-                if done[0]:
-                    break
+                terminal = bool(done[0])
             else:
                 obs, reward, terminated, truncated, info = env.step(action)
-                episode_reward += reward
+                step_reward = float(reward)
+                step_info = info
+                episode_reward += step_reward
                 step_count += 1
-                if terminated or truncated:
-                    break
+                terminal = bool(terminated or truncated)
+
+            row = {"step": step_count, "reward": step_reward}
+            rc = step_info.get("reward_components") if isinstance(step_info, dict) else None
+            if rc:
+                for k, v in rc.items():
+                    row[f"rc_{k}"] = float(v) if isinstance(v, (int, float)) else v
+            reward_log.append(row)
+
+            if terminal:
+                break
+
+        # Persist per-step reward breakdown for this episode
+        if reward_log:
+            keys = sorted({k for r in reward_log for k in r.keys()})
+            csv_path = os.path.join(ep_dir, "reward_breakdown.csv")
+            with open(csv_path, "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=keys)
+                w.writeheader()
+                w.writerows(reward_log)
 
         all_rewards.append(episode_reward)
         all_steps.append(step_count)
