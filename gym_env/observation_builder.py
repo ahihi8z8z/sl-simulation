@@ -16,25 +16,44 @@ DEFAULT_OBS_METRICS = [
     "lifecycle.instances_prewarm",
 ]
 
-# Metrics that are cumulative counters — auto-converted to delta
+# Metrics that are cumulative counters — auto-converted to delta.
+# Names containing `*` are templates: `*` is replaced by service id when
+# such a metric (or one referencing it via a computed spec) is requested.
 CUMULATIVE_METRICS = {
     "request.completed",
     "request.dropped",
     "request.cold_starts",
     "request.total",
     "request.truncated",
+    "request.*.completed",
+    "request.*.dropped",
+    "request.*.cold_starts",
+    "request.*.total",
+    "request.*.truncated",
     "lifecycle.instances_evicted",
     "lifecycle.total_cpu_seconds",
     "lifecycle.total_memory_seconds",
+    "lifecycle.*.total_cpu_seconds",
+    "lifecycle.*.total_memory_seconds",
+    "lifecycle.*.running_cpu_seconds",
+    "lifecycle.*.running_memory_seconds",
 }
 
-# Computed virtual metrics — derived from deltas of other metrics
+# Computed virtual metrics — derived from deltas of other metrics.
+# `*` in key/spec is a per-service template, expanded at __init__.
 # Format: "computed.<name>": (numerator_metric, denominator_metric, default)
 COMPUTED_METRICS = {
-    # cold_start_ratio = d(cold_starts) / d(total)
     "computed.cold_start_ratio": ("request.cold_starts", "request.total", 0.0),
-    # drop_ratio = d(dropped) / d(total)
     "computed.drop_ratio": ("request.dropped", "request.total", 0.0),
+    "computed.*.cold_start_ratio": ("request.*.cold_starts", "request.*.total", 0.0),
+    "computed.*.drop_ratio": ("request.*.dropped", "request.*.total", 0.0),
+    # Per-pod utilization (DRe-SCale style): running / allocated, per service.
+    "computed.*.cpu_util_per_pod_step": (
+        "lifecycle.*.running_cpu_seconds", "lifecycle.*.total_cpu_seconds", 0.0,
+    ),
+    "computed.*.mem_util_per_pod_step": (
+        "lifecycle.*.running_memory_seconds", "lifecycle.*.total_memory_seconds", 0.0,
+    ),
 }
 
 # Time-averaged utilization over the step:
@@ -50,7 +69,64 @@ UTILIZATION_STEP_METRICS = {
         "lifecycle.total_cpu_seconds",
         "cluster.cpu_capacity",
     ),
+    # Per-service footprint vs cluster capacity (sum across services = global)
+    "computed.*.memory_utilization_step": (
+        "lifecycle.*.total_memory_seconds",
+        "cluster.memory_capacity",
+    ),
+    "computed.*.cpu_utilization_step": (
+        "lifecycle.*.total_cpu_seconds",
+        "cluster.cpu_capacity",
+    ),
 }
+
+# Special computed metrics whose handling is hardcoded in build() — declared
+# here so wildcard expansion + cumulative tracking work uniformly.
+# Each entry: template_name -> tracked_cumulative_template
+SPECIAL_COMPUTED = {
+    "computed.avg_inter_arrival_time": "request.total",
+    "computed.request_rate": "request.total",
+    "computed.*.avg_inter_arrival_time": "request.*.total",
+    "computed.*.request_rate": "request.*.total",
+}
+
+
+def _expand_wildcards(metric_names: list[str], service_ids: list[str] | None) -> list[str]:
+    """Expand `*` in metric names to concrete service ids (sorted, deterministic).
+
+    Strict — every error case raises ValueError.
+    """
+    expanded: list[str] = []
+    seen: set[str] = set()
+    sorted_svcs = sorted(service_ids) if service_ids else []
+
+    for name in metric_names:
+        n_stars = name.count("*")
+        if n_stars == 0:
+            if name in seen:
+                raise ValueError(f"duplicate observation metric: '{name}'")
+            seen.add(name)
+            expanded.append(name)
+            continue
+        if n_stars > 1:
+            raise ValueError(f"metric '{name}' must contain at most one '*'")
+        # n_stars == 1
+        if service_ids is None:
+            raise ValueError(
+                f"ObservationBuilder needs service_ids when wildcards are used "
+                f"(metric '{name}')"
+            )
+        if not sorted_svcs:
+            raise ValueError(
+                f"wildcard metric '{name}' requires at least one service"
+            )
+        for svc in sorted_svcs:
+            concrete = name.replace("*", svc)
+            if concrete in seen:
+                raise ValueError(f"duplicate observation metric: '{concrete}'")
+            seen.add(concrete)
+            expanded.append(concrete)
+    return expanded
 
 
 class ObservationBuilder:
@@ -66,27 +142,86 @@ class ObservationBuilder:
     """
 
     def __init__(self, metric_names: list[str] | None = None,
-                 step_duration: float = 5.0):
-        self.metric_names = metric_names or DEFAULT_OBS_METRICS
+                 step_duration: float = 5.0,
+                 service_ids: list[str] | None = None):
+        raw_names = metric_names or DEFAULT_OBS_METRICS
+        self.metric_names = _expand_wildcards(raw_names, service_ids)
         self.step_duration = step_duration
         self.obs_size = len(self.metric_names)
         self._prev: dict[str, float] = {}
 
-        # Collect all cumulative metrics we need to track
-        # (both directly requested and those needed for computed metrics)
+        # Resolve each requested name against the templates in CUMULATIVE_METRICS,
+        # COMPUTED_METRICS, UTILIZATION_STEP_METRICS, SPECIAL_COMPUTED — taking
+        # the per-service template variant when the name has a service segment.
+        self._cumulative: set[str] = set()                    # leaf cumulative names
+        self._computed: dict[str, tuple[str, str, float]] = {}
+        self._utilization: dict[str, tuple[str, str]] = {}
+        self._special: dict[str, tuple[str, str]] = {}        # name -> (kind, dep)
         self._tracked_cumulative: set[str] = set()
+
         for name in self.metric_names:
-            if name in CUMULATIVE_METRICS:
+            if self._match_set(name, CUMULATIVE_METRICS):
+                self._cumulative.add(name)
                 self._tracked_cumulative.add(name)
-            elif name in COMPUTED_METRICS:
-                spec = COMPUTED_METRICS[name]
-                self._tracked_cumulative.add(spec[0])
-                self._tracked_cumulative.add(spec[1])
-            elif name in UTILIZATION_STEP_METRICS:
-                num, _ = UTILIZATION_STEP_METRICS[name]
+                continue
+            spec = self._match_dict(name, COMPUTED_METRICS)
+            if spec is not None:
+                num, den, default = spec
+                self._computed[name] = (num, den, default)
                 self._tracked_cumulative.add(num)
-            elif name in ("computed.avg_inter_arrival_time", "computed.request_rate"):
-                self._tracked_cumulative.add("request.total")
+                self._tracked_cumulative.add(den)
+                continue
+            util = self._match_dict(name, UTILIZATION_STEP_METRICS)
+            if util is not None:
+                num, cap = util
+                self._utilization[name] = (num, cap)
+                self._tracked_cumulative.add(num)
+                continue
+            special_dep = self._match_dict(name, SPECIAL_COMPUTED)
+            if special_dep is not None:
+                # Resolve the kind by stripping the (optional) service segment
+                kind = name.rsplit(".", 1)[-1]   # "request_rate" or "avg_inter_arrival_time"
+                self._special[name] = (kind, special_dep)
+                self._tracked_cumulative.add(special_dep)
+                continue
+            # else: treat as raw snapshot read in build()
+
+    @staticmethod
+    def _template_match(name: str, template: str) -> dict[str, str] | None:
+        """Return {} if name == template, {svc: <svc>} if template has `*` and
+        name fits the pattern (single segment in place of `*`), else None."""
+        if "*" not in template:
+            return {} if name == template else None
+        # Split on `*` once — at most one star per template
+        before, after = template.split("*", 1)
+        if not name.startswith(before) or not name.endswith(after):
+            return None
+        svc = name[len(before):len(name) - len(after)] if after else name[len(before):]
+        if not svc or "." in svc:
+            return None  # require a single, non-empty segment
+        return {"svc": svc}
+
+    @classmethod
+    def _match_set(cls, name: str, templates: set[str]) -> bool:
+        return any(cls._template_match(name, t) is not None for t in templates)
+
+    @classmethod
+    def _match_dict(cls, name: str, templates: dict):
+        """Return the spec value with `*` substituted, or None."""
+        for tmpl, spec in templates.items():
+            m = cls._template_match(name, tmpl)
+            if m is None:
+                continue
+            svc = m.get("svc")
+            if svc is None:
+                return spec
+            # Substitute `*` in spec strings
+            if isinstance(spec, tuple):
+                return tuple(s.replace("*", svc) if isinstance(s, str) else s for s in spec)
+            if isinstance(spec, str):
+                return spec.replace("*", svc)
+            return spec
+        return None
 
     def reset(self) -> None:
         """Reset delta tracking (call on env reset)."""
@@ -104,25 +239,26 @@ class ObservationBuilder:
 
         obs = np.zeros(self.obs_size, dtype=np.float32)
         for i, name in enumerate(self.metric_names):
-            if name in CUMULATIVE_METRICS:
+            if name in self._cumulative:
                 obs[i] = deltas.get(name, 0.0)
-            elif name == "computed.avg_inter_arrival_time":
-                d_total = deltas.get("request.total", 0.0)
-                obs[i] = self.step_duration / max(d_total, 1.0)
-            elif name == "computed.request_rate":
-                d_total = deltas.get("request.total", 0.0)
-                obs[i] = d_total / self.step_duration
-            elif name in UTILIZATION_STEP_METRICS:
-                num_key, cap_key = UTILIZATION_STEP_METRICS[name]
+            elif name in self._special:
+                kind, dep = self._special[name]
+                d = deltas.get(dep, 0.0)
+                if kind == "request_rate":
+                    obs[i] = d / self.step_duration
+                elif kind == "avg_inter_arrival_time":
+                    obs[i] = self.step_duration / max(d, 1.0)
+            elif name in self._utilization:
+                num_key, cap_key = self._utilization[name]
                 d_num = deltas.get(num_key, 0.0)
                 capacity = float(snapshot.get(cap_key, 0.0))
                 max_possible = capacity * self.step_duration
                 obs[i] = (d_num / max_possible) if max_possible > 0 else 0.0
-            elif name in COMPUTED_METRICS:
-                spec = COMPUTED_METRICS[name]
-                num = deltas.get(spec[0], 0.0)
-                den = deltas.get(spec[1], 0.0)
-                obs[i] = (num / den) if den > 0 else spec[2]
+            elif name in self._computed:
+                num_key, den_key, default = self._computed[name]
+                num = deltas.get(num_key, 0.0)
+                den = deltas.get(den_key, 0.0)
+                obs[i] = (num / den) if den > 0 else default
             else:
                 obs[i] = float(snapshot.get(name, 0.0))
         return obs

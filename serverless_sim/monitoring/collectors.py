@@ -33,6 +33,19 @@ class RequestCollector(BaseCollector):
         if c.completed > 0:
             metrics["request.latency_mean"] = store.latency_mean
 
+        # Per-service breakdown (one entry per service that has seen any traffic)
+        for svc_id, sc in store._per_service_counters.items():
+            metrics[f"request.{svc_id}.total"] = sc.total
+            metrics[f"request.{svc_id}.completed"] = sc.completed
+            metrics[f"request.{svc_id}.dropped"] = sc.dropped
+            metrics[f"request.{svc_id}.cold_starts"] = sc.cold_starts
+            metrics[f"request.{svc_id}.truncated"] = sc.truncated
+            metrics[f"request.{svc_id}.in_flight"] = store._per_service_active.get(svc_id, 0)
+            if sc.completed > 0:
+                metrics[f"request.{svc_id}.latency_mean"] = (
+                    store._per_service_latency_sum.get(svc_id, 0.0) / sc.completed
+                )
+
         return metrics
 
 
@@ -142,6 +155,16 @@ class LifecycleCollector(BaseCollector):
         for svc_id, counts in per_service.items():
             metrics[f"lifecycle.{svc_id}.instances_total"] = counts["total"]
             metrics[f"lifecycle.{svc_id}.instances_running"] = counts["running"]
+
+        # Per-service cumulative resource-seconds (for utilization_step computed metrics)
+        for svc_id, val in lm.per_service_total_cpu_seconds.items():
+            metrics[f"lifecycle.{svc_id}.total_cpu_seconds"] = val
+        for svc_id, val in lm.per_service_total_memory_seconds.items():
+            metrics[f"lifecycle.{svc_id}.total_memory_seconds"] = val
+        for svc_id, val in lm.per_service_running_cpu_seconds.items():
+            metrics[f"lifecycle.{svc_id}.running_cpu_seconds"] = val
+        for svc_id, val in lm.per_service_running_memory_seconds.items():
+            metrics[f"lifecycle.{svc_id}.running_memory_seconds"] = val
 
         return metrics
 

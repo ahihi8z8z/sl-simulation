@@ -50,11 +50,23 @@ class RequestStore:
         self._latency_sum: float = 0.0
         self._trace_writer: BatchCSVWriter | None = None
 
+        # Per-service counters / latency sum / active count (lazy-created)
+        self._per_service_counters: dict[str, RequestCounters] = {}
+        self._per_service_latency_sum: dict[str, float] = {}
+        self._per_service_active: dict[str, int] = {}
+
         # Per-service inter-arrival tracking
         self._last_arrival: dict[str, float] = {}
         self._inter_arrival: dict[str, float] = {}
         # Per-service last cold-start flag (True/False for most recent completed request)
         self._last_cold_start: dict[str, bool] = {}
+
+    def _svc_counters(self, svc_id: str) -> RequestCounters:
+        c = self._per_service_counters.get(svc_id)
+        if c is None:
+            c = RequestCounters()
+            self._per_service_counters[svc_id] = c
+        return c
 
     # ------------------------------------------------------------------
     # Trace writer lifecycle
@@ -81,8 +93,11 @@ class RequestStore:
         self._active[inv.request_id] = inv
         self.counters.total += 1
 
-        # Update inter-arrival time for the service
         svc = inv.service_id
+        self._svc_counters(svc).total += 1
+        self._per_service_active[svc] = self._per_service_active.get(svc, 0) + 1
+
+        # Update inter-arrival time for the service
         prev = self._last_arrival.get(svc)
         if prev is not None:
             self._inter_arrival[svc] = inv.arrival_time - prev
@@ -91,17 +106,32 @@ class RequestStore:
     def finalize(self, inv: Invocation) -> None:
         """Record terminal state, stream to CSV, remove from memory."""
         status = inv.status
+        svc = inv.service_id
+        svc_c = self._svc_counters(svc)
+
         if status == "completed":
             self.counters.completed += 1
+            svc_c.completed += 1
             if inv.cold_start:
                 self.counters.cold_starts += 1
-            self._last_cold_start[inv.service_id] = inv.cold_start
+                svc_c.cold_starts += 1
+            self._last_cold_start[svc] = inv.cold_start
             if inv.execution_start_time is not None and inv.arrival_time is not None:
-                self._latency_sum += inv.execution_start_time - inv.arrival_time
+                lat = inv.execution_start_time - inv.arrival_time
+                self._latency_sum += lat
+                self._per_service_latency_sum[svc] = (
+                    self._per_service_latency_sum.get(svc, 0.0) + lat
+                )
         elif status == "dropped":
             self.counters.dropped += 1
+            svc_c.dropped += 1
         elif status == "truncated":
             self.counters.truncated += 1
+            svc_c.truncated += 1
+
+        # Decrement per-service in-flight (any terminal status)
+        if svc in self._per_service_active and self._per_service_active[svc] > 0:
+            self._per_service_active[svc] -= 1
 
         if self._trace_writer is not None:
             self._write_trace_row(inv)
