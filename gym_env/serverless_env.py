@@ -44,7 +44,9 @@ class ServerlessEnv(gym.Env):
         pool_states              : list  (optional override; else discovered from autoscaler)
         observation_metrics      : list  (optional)
         reward                   : dict  (optional; see RewardCalculator)
-        random_start_minute      : dict  (optional; see gym_env.random_start)
+
+    Note: ``random_start_minute`` lives in sim_config (top-level) so the
+    standalone simulate path can use it too. See ``gym_env.random_start``.
     """
 
     metadata = {"render_modes": []}
@@ -111,6 +113,11 @@ class ServerlessEnv(gym.Env):
             self.action_space = spaces.MultiDiscrete(self._action_mapper.dimensions)
 
     def _build(self) -> None:
+        # Close the previous build's streaming writer before the new build
+        # truncates the same CSV path — otherwise two writers race on one file.
+        if self._engine is not None:
+            self._engine.ctx.monitor_manager.close_streaming()
+
         logger = logging.getLogger(f"multi_env_{id(self)}")
         logger.handlers.clear()
         logger.setLevel(logging.WARNING)
@@ -140,13 +147,17 @@ class ServerlessEnv(gym.Env):
         if ctx.autoscaling_manager:
             self._autoscaling_api = AutoscalingAPI(ctx.autoscaling_manager)
 
-        # Observation builder
+        # Action mapper — use config override or discover from autoscaler.
+        # Sorted so action and observation layouts agree on service order
+        # (ObservationBuilder also expands wildcards in sorted order).
+        service_ids = sorted(ctx.workload_manager.services.keys())
+
+        # Observation builder (needs service_ids to expand `*` wildcards)
         obs_metrics = self.gym_config.get("observation_metrics", None)
         self._obs_builder = ObservationBuilder(metric_names=obs_metrics,
-                                                  step_duration=self.step_duration)
+                                                  step_duration=self.step_duration,
+                                                  service_ids=service_ids)
 
-        # Action mapper — use config override or discover from autoscaler
-        service_ids = list(ctx.workload_manager.services.keys())
         pool_states_override = self.gym_config.get("pool_states", None)
         pool_states = {}
         for svc_id in service_ids:
@@ -179,9 +190,7 @@ class ServerlessEnv(gym.Env):
             # Random seed each episode for variation in transition sampling
             self.sim_config["simulation"]["seed"] = int(self.np_random.integers(0, 2**31))
 
-        chosen_start = apply_random_start_minute(
-            self.sim_config, self.gym_config, self.np_random
-        )
+        chosen_start = apply_random_start_minute(self.sim_config, self.np_random)
 
         self._build()
         self._current_step = 0

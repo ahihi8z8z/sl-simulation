@@ -1,8 +1,12 @@
-"""Helper for randomizing services[*].workload.start_minute on each gym reset.
+"""Helper for randomizing services[*].workload.start_minute.
 
-Auto-detects upper bound from the trace file (CSV) so the agent can land
+Auto-detects upper bound from the trace file (CSV) so callers can land
 anywhere within the trace's effective range. The same `start_minute` is
-shared across all services with a trace-based workload (one draw per reset).
+shared across all services with a trace-based workload (one draw per call).
+
+Config lives at ``sim_config["random_start_minute"]`` so both the gym env
+(re-rolled each reset) and the standalone simulate path (rolled once at
+startup) share the same source of truth.
 """
 
 from __future__ import annotations
@@ -49,10 +53,10 @@ def _trace_max_minute(trace_path: str, generator: str) -> int:
     return int((max_ts - min_ts) // 60)
 
 
-def apply_random_start_minute(sim_config: dict, gym_config: dict, np_random) -> int | None:
+def apply_random_start_minute(sim_config: dict, np_random) -> int | None:
     """Mutate sim_config services in place; return the chosen start_minute.
 
-    gym_config layout::
+    sim_config layout::
 
         "random_start_minute": {
             "enabled": true,
@@ -62,7 +66,7 @@ def apply_random_start_minute(sim_config: dict, gym_config: dict, np_random) -> 
 
     Returns ``None`` when disabled or when no trace-based service is present.
     """
-    cfg = gym_config.get("random_start_minute") or {}
+    cfg = sim_config.get("random_start_minute") or {}
     if not cfg.get("enabled"):
         return None
 

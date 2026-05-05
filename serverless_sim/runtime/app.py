@@ -32,6 +32,15 @@ def run_simulate(args):
     logger.info("Config loaded successfully from %s", args.sim_config)
     logger.info("Run directory: %s", run_dir)
 
+    # Roll random_start_minute once at startup, seeded by simulation.seed so
+    # baselines and gym eval can share the same offset for fair comparison.
+    import numpy as np
+    from gym_env.random_start import apply_random_start_minute
+    rng = np.random.default_rng(config["simulation"]["seed"])
+    chosen_start = apply_random_start_minute(config, rng)
+    if chosen_start is not None:
+        logger.info("random_start_minute=%d (seeded by simulation.seed)", chosen_start)
+
     # Build
     export_mode = getattr(args, "export_mode", None)
     builder = SimulationBuilder()
