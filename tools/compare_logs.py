@@ -79,19 +79,37 @@ def load_log(log_dir: str) -> dict:
     }
 
 
-def _seed_scalar_metrics(seed: dict) -> dict:
-    """Extract per-seed scalar metrics for the 2x2 bar plot."""
+def _seed_scalar_metrics(seed: dict, service: str | None = None) -> dict:
+    """Extract per-seed scalar metrics for the bar plot.
+
+    If ``service`` is given, cold/drop/latency are derived from trace filtered
+    to that service. mem_per_req and power_per_req stay cluster-wide (not
+    available per-service in summary/system_metrics).
+    """
     s = seed.get("summary", {})
     r = s.get("requests", {})
     eff = s.get("effective_resource_ratio", {})
 
     trace = seed.get("trace")
-    if trace is not None and len(trace) > 0:
-        completed = trace[trace["status"] == "completed"]
-        latencies = completed["execution_start_time"] - completed["arrival_time"]
-        avg_lat = float(latencies.mean() * 1000.0) if len(latencies) > 0 else 0.0
+    if service is not None:
+        if trace is not None and len(trace) > 0:
+            t = trace[trace["service_id"] == service]
+            cold_starts = float(t["cold_start"].sum()) if "cold_start" in t.columns else 0.0
+            drops = float((t["status"] == "dropped").sum())
+            completed = t[t["status"] == "completed"]
+            latencies = completed["execution_start_time"] - completed["arrival_time"]
+            avg_lat = float(latencies.mean() * 1000.0) if len(latencies) > 0 else 0.0
+        else:
+            cold_starts, drops, avg_lat = 0.0, 0.0, 0.0
     else:
-        avg_lat = 0.0
+        cold_starts = float(r.get("cold_starts", 0))
+        drops = float(r.get("dropped", 0))
+        if trace is not None and len(trace) > 0:
+            completed = trace[trace["status"] == "completed"]
+            latencies = completed["execution_start_time"] - completed["arrival_time"]
+            avg_lat = float(latencies.mean() * 1000.0) if len(latencies) > 0 else 0.0
+        else:
+            avg_lat = 0.0
 
     mem_per_req = float(eff.get("memory_per_request", 0.0))
 
@@ -111,17 +129,17 @@ def _seed_scalar_metrics(seed: dict) -> dict:
             power_per_req = mean_w * duration / completed_n
 
     return {
-        "cold_starts": float(r.get("cold_starts", 0)),
-        "drops": float(r.get("dropped", 0)),
+        "cold_starts": cold_starts,
+        "drops": drops,
         "avg_lat": avg_lat,
         "mem_per_req": mem_per_req,
         "power_per_req": power_per_req,
     }
 
 
-def _aggregate_group(group: dict, keys: list[str]) -> dict[str, tuple[float, float]]:
+def _aggregate_group(group: dict, keys: list[str], service: str | None = None) -> dict[str, tuple[float, float]]:
     """Return {key: (mean, std)} across seeds in this group."""
-    per_seed = [_seed_scalar_metrics(s) for s in group["seeds"]]
+    per_seed = [_seed_scalar_metrics(s, service=service) for s in group["seeds"]]
     out = {}
     for k in keys:
         vals = np.array([d[k] for d in per_seed], dtype=float)
@@ -129,16 +147,16 @@ def _aggregate_group(group: dict, keys: list[str]) -> dict[str, tuple[float, flo
     return out
 
 
-def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> None:
+def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str,
+                     service: str | None = None) -> None:
     """2x2 bar plot with mean±std across seeds per group.
 
-    Panel (0,0): grouped bars for cold starts / drops per group.
-    Panel (0,1): mean latency over all completed requests (ms).
-    Panel (1,0): memory-seconds per request from summary (MB·s).
-    Panel (1,1): mean cluster power (W).
+    If ``service`` is set, cold/drop/latency are filtered to that service.
+    The mem_per_req and power_per_req panels show cluster-wide values
+    (per-service breakdown not tracked in summary / system_metrics).
     """
     keys = ["cold_starts", "drops", "avg_lat", "mem_per_req", "power_per_req"]
-    agg = [_aggregate_group(g, keys) for g in groups]
+    agg = [_aggregate_group(g, keys, service=service) for g in groups]
 
     def vals(k): return [a[k][0] for a in agg], [a[k][1] for a in agg]
 
@@ -190,11 +208,13 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str) -> 
         ax.grid(axis="y", alpha=0.3)
 
     n_seeds_str = ", ".join(f"{l}: n={g['n_seeds']}" for l, g in zip(labels, groups))
-    fig.suptitle(f"Performance Metrics Comparison ({n_seeds_str})", fontsize=12)
+    scope = f" — service={service}" if service else ""
+    fig.suptitle(f"Performance Metrics Comparison{scope} ({n_seeds_str})", fontsize=12)
     plt.tight_layout()
-    fig.savefig(os.path.join(output_dir, "comparison_metrics.png"), dpi=150)
+    fname = f"comparison_metrics_svc_{service}.png" if service else "comparison_metrics.png"
+    fig.savefig(os.path.join(output_dir, fname), dpi=150)
     plt.close(fig)
-    print(f"  Saved: comparison_metrics.png")
+    print(f"  Saved: {fname}")
 
 
 def _pick_bucket(seeds: list[dict]) -> tuple[float, str]:
@@ -243,35 +263,53 @@ def _hourly_mean_across_seeds(seeds: list[dict], columns: list[str]) -> tuple[pd
 
 
 def plot_container_comparison(groups: list[dict], labels: list[str], output_dir: str,
-                              smooth: int = 5) -> None:
-    """Stacked area per group: prewarm/warm/running, per-hour mean across seeds."""
+                              smooth: int = 5, service: str | None = None) -> None:
+    """Container chart per group, per-bucket mean across seeds.
+
+    Cluster-wide (service=None): stacked area of prewarm/warm/running.
+    Per-service: line plot of running and total (state breakdown not
+    available per-service in system_metrics).
+    """
     n_runs = len(groups)
     fig, axes = plt.subplots(n_runs, 1, figsize=(12, 3.5 * n_runs), sharex=True)
     if n_runs == 1:
         axes = [axes]
 
-    state_colors = {"prewarm": "#2196F3", "warm": "#F44336", "running": "#FF9800"}
-    state_cols = [f"lifecycle.instances_{s}" for s in ("prewarm", "warm", "running")]
+    if service is None:
+        state_colors = {"prewarm": "#2196F3", "warm": "#F44336", "running": "#FF9800"}
+        wanted_cols = [f"lifecycle.instances_{s}" for s in ("prewarm", "warm", "running")]
+    else:
+        wanted_cols = [f"lifecycle.{service}.instances_running",
+                       f"lifecycle.{service}.instances_total"]
+
     _legend_handles, _legend_labels = [], []
     x_unit = "hours"
 
     for ax, group, label in zip(axes, groups, labels):
-        result = _hourly_mean_across_seeds(group["seeds"], state_cols)
+        result = _hourly_mean_across_seeds(group["seeds"], wanted_cols)
         if result is None:
             continue
         hourly, x_unit = result
-
         time_hours = hourly.index.values.astype(float)
-        states, values_list, colors = [], [], []
-        for state in ("prewarm", "warm", "running"):
-            col = f"lifecycle.instances_{state}"
-            if col in hourly.columns:
-                states.append(state)
-                values_list.append(hourly[col].fillna(0).values)
-                colors.append(state_colors.get(state, "#999999"))
 
-        if values_list:
-            ax.stackplot(time_hours, *values_list, labels=states, colors=colors, alpha=0.85)
+        if service is None:
+            states, values_list, colors = [], [], []
+            for state in ("prewarm", "warm", "running"):
+                col = f"lifecycle.instances_{state}"
+                if col in hourly.columns:
+                    states.append(state)
+                    values_list.append(hourly[col].fillna(0).values)
+                    colors.append(state_colors.get(state, "#999999"))
+            if values_list:
+                ax.stackplot(time_hours, *values_list, labels=states, colors=colors, alpha=0.85)
+        else:
+            for col, name, color in [
+                (f"lifecycle.{service}.instances_total", "total", "#2196F3"),
+                (f"lifecycle.{service}.instances_running", "running", "#FF9800"),
+            ]:
+                if col in hourly.columns:
+                    ax.plot(time_hours, hourly[col].fillna(0).values,
+                            label=name, color=color, linewidth=1.5)
 
         title = f"{label} (n={group['n_seeds']})" if group["n_seeds"] > 1 else label
         ax.set_ylabel("Instances")
@@ -286,16 +324,23 @@ def plot_container_comparison(groups: list[dict], labels: list[str], output_dir:
         fig.legend(_legend_handles, _legend_labels, loc="upper center",
                    ncol=len(_legend_labels), fontsize=8, frameon=False,
                    bbox_to_anchor=(0.5, 1.0))
+    if service:
+        fig.suptitle(f"Containers — service={service}", fontsize=11, y=1.01)
     plt.tight_layout()
     fig.subplots_adjust(top=0.93)
-    fig.savefig(os.path.join(output_dir, "comparison_containers.png"), dpi=150)
+    fname = f"comparison_containers_svc_{service}.png" if service else "comparison_containers.png"
+    fig.savefig(os.path.join(output_dir, fname), dpi=150)
     plt.close(fig)
-    print(f"  Saved: comparison_containers.png")
+    print(f"  Saved: {fname}")
 
 
-def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str) -> None:
-    """Line chart per group: pool_target lines (mean across seeds) + idle
-    window on twin axis (mean across seeds)."""
+def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str,
+                      service: str | None = None) -> None:
+    """Line chart per group: pool_target lines + idle window (twin axis).
+
+    Cluster-wide (service=None): finds first matching pool_target.<state>
+    column (any service). Per-service: filters to ``autoscaling.<service>.*``.
+    """
     n_runs = len(groups)
     fig, axes = plt.subplots(n_runs, 1, figsize=(12, 3.5 * n_runs), sharex=True)
     if n_runs == 1:
@@ -312,13 +357,19 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str) ->
             continue
         all_cols = list(sample_metrics.columns)
 
+        if service is not None:
+            svc_prefix = f"autoscaling.{service}."
+            cols_in_scope = [c for c in all_cols if c.startswith(svc_prefix)]
+        else:
+            cols_in_scope = all_cols
+
         target_cols = {}
         for state in ("prewarm", "warm"):
-            for col in all_cols:
+            for col in cols_in_scope:
                 if f"pool_target.{state}" in col:
                     target_cols[state] = col
                     break
-        idle_col = next((c for c in all_cols if "idle_timeout" in c), None)
+        idle_col = next((c for c in cols_in_scope if "idle_timeout" in c), None)
 
         wanted = list(target_cols.values()) + ([idle_col] if idle_col else [])
         result = _hourly_mean_across_seeds(group["seeds"], wanted)
@@ -372,16 +423,19 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str) ->
         fig.legend(_legend_handles, _legend_labels, loc="upper center",
                    ncol=len(_legend_labels), fontsize=8, frameon=False,
                    bbox_to_anchor=(0.5, 1.0))
+    if service:
+        fig.suptitle(f"Pool targets — service={service}", fontsize=11, y=1.01)
     plt.tight_layout()
     fig.subplots_adjust(top=0.93)
-    fig.savefig(os.path.join(output_dir, "comparison_pool_targets.png"), dpi=150)
+    fname = f"comparison_pool_targets_svc_{service}.png" if service else "comparison_pool_targets.png"
+    fig.savefig(os.path.join(output_dir, fname), dpi=150)
     plt.close(fig)
-    print(f"  Saved: comparison_pool_targets.png")
+    print(f"  Saved: {fname}")
 
 
-def plot_latency_cdf(groups: list[dict], labels: list[str], output_dir: str) -> None:
-    """CDF of request latency per group. Latencies from all seeds concatenated
-    — treats each request (across seeds) as an independent sample."""
+def plot_latency_cdf(groups: list[dict], labels: list[str], output_dir: str,
+                     service: str | None = None) -> None:
+    """CDF of request latency per group, optionally filtered by service."""
     fig, ax = plt.subplots(figsize=(9, 5))
     colors = [COLORS[i % len(COLORS)] for i in range(len(labels))]
 
@@ -391,7 +445,8 @@ def plot_latency_cdf(groups: list[dict], labels: list[str], output_dir: str) -> 
             trace = seed.get("trace")
             if trace is None or len(trace) == 0:
                 continue
-            completed = trace[trace["status"] == "completed"]
+            t = trace if service is None else trace[trace["service_id"] == service]
+            completed = t[t["status"] == "completed"]
             latencies = (completed["execution_start_time"] - completed["arrival_time"]) * 1000.0
             latencies = latencies[latencies > 0].to_numpy()
             if len(latencies) > 0:
@@ -407,15 +462,38 @@ def plot_latency_cdf(groups: list[dict], labels: list[str], output_dir: str) -> 
 
     ax.set_xlabel("Latency (ms)")
     ax.set_ylabel("CDF")
-    ax.set_title("Distribution of Cold Start Latency")
+    title = "Distribution of Cold Start Latency"
+    if service:
+        title += f" — service={service}"
+    ax.set_title(title)
     ax.set_ylim(0, 1.02)
     ax.grid(alpha=0.3)
     ax.legend(fontsize=9, loc="lower right")
 
     plt.tight_layout()
-    fig.savefig(os.path.join(output_dir, "comparison_latency_cdf.png"), dpi=150)
+    fname = f"comparison_latency_cdf_svc_{service}.png" if service else "comparison_latency_cdf.png"
+    fig.savefig(os.path.join(output_dir, fname), dpi=150)
     plt.close(fig)
-    print(f"  Saved: comparison_latency_cdf.png")
+    print(f"  Saved: {fname}")
+
+
+def discover_services(groups: list[dict]) -> list[str]:
+    """Union of service IDs found in any seed's trace or system_metrics."""
+    found: set[str] = set()
+    import re
+    pat = re.compile(r"^lifecycle\.([^.]+)\.instances_total$")
+    for g in groups:
+        for seed in g["seeds"]:
+            trace = seed.get("trace")
+            if trace is not None and "service_id" in trace.columns:
+                found.update(map(str, trace["service_id"].dropna().unique()))
+            metrics = seed.get("metrics")
+            if metrics is not None:
+                for c in metrics.columns:
+                    m = pat.match(c)
+                    if m:
+                        found.add(m.group(1))
+    return sorted(found)
 
 
 def main():
@@ -426,6 +504,9 @@ def main():
     parser.add_argument("--output-dir", default="plots/comparison", help="Output directory")
     parser.add_argument("--smooth", type=int, default=5,
                         help="Smoothing window for container chart (default: 5)")
+    parser.add_argument("--services", default=None,
+                        help="Comma-separated services for per-service plots "
+                             "(default: auto-detect; 'none' to skip)")
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -435,10 +516,29 @@ def main():
 
     seeds_summary = ", ".join(f"{l}={g['n_seeds']}" for l, g in zip(labels, groups))
     print(f"Comparing {len(groups)} groups: {labels} (seeds: {seeds_summary})")
+
+    # Cluster-wide
     plot_metrics_bar(groups, labels, args.output_dir)
     plot_container_comparison(groups, labels, args.output_dir, smooth=args.smooth)
     plot_pool_targets(groups, labels, args.output_dir)
     plot_latency_cdf(groups, labels, args.output_dir)
+
+    # Per-service
+    if args.services == "none":
+        services: list[str] = []
+    elif args.services:
+        services = [s.strip() for s in args.services.split(",") if s.strip()]
+    else:
+        services = discover_services(groups)
+    if services:
+        print(f"\nPer-service plots: {services}")
+    for svc in services:
+        plot_metrics_bar(groups, labels, args.output_dir, service=svc)
+        plot_container_comparison(groups, labels, args.output_dir,
+                                  smooth=args.smooth, service=svc)
+        plot_pool_targets(groups, labels, args.output_dir, service=svc)
+        plot_latency_cdf(groups, labels, args.output_dir, service=svc)
+
     print(f"\nAll plots in {args.output_dir}/")
 
 
