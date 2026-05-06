@@ -58,17 +58,29 @@ class _SaveVecNormOnBest(BaseCallback):
         return True
 
 
+# Reward-term keys logged to TensorBoard. Counts (d_total/d_completed/...)
+# are omitted intentionally — they're not penalty terms.
+REWARD_TERM_KEYS = ("drop_ratio", "cold_ratio", "mem_utilization", "cpu_utilization","latency_mean")
+
+
 class RewardComponentLogger(BaseCallback):
-    """Log reward components via logger.record_mean() — accumulated across
-    all steps between SB3 dumps, then reset. No manual buffer/flush needed."""
+    """Log reward terms (mean across steps and services) to TensorBoard.
+    """
 
     def _on_step(self) -> bool:
         infos = self.locals.get("infos", [])
         for info in infos:
             rc = info.get("reward_components")
-            if rc and rc.get("d_total", 0) > 0:
-                for key, val in rc.items():
-                    self.logger.record_mean(f"reward/{key}", float(val))
+            if not rc or rc.get("d_total", 0) <= 0:
+                continue
+            for key in REWARD_TERM_KEYS:
+                if key in rc:
+                    self.logger.record_mean(f"reward/{key}", float(rc[key]))
+            for svc, comps in rc.get("services", {}).items():
+                for key in REWARD_TERM_KEYS:
+                    if key in comps:
+                        self.logger.record_mean(f"reward/{svc}/{key}",
+                                                float(comps[key]))
         return True
 
 

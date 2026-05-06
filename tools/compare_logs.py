@@ -111,22 +111,54 @@ def _seed_scalar_metrics(seed: dict, service: str | None = None) -> dict:
         else:
             avg_lat = 0.0
 
-    mem_per_req = float(eff.get("memory_per_request", 0.0))
+    if service is not None:
+        # Per-service mem-seconds / completed (from system_metrics)
+        m = seed.get("metrics")
+        col = f"lifecycle.{service}.total_memory_seconds"
+        if m is not None and col in m.columns and len(m) > 0:
+            mem_sec = float(pd.to_numeric(m[col], errors="coerce").max())  # cumulative
+            n_completed = float(((trace["service_id"] == service)
+                                 & (trace["status"] == "completed")).sum()
+                                if trace is not None else 0)
+            mem_per_req = (mem_sec / n_completed) if n_completed > 0 else 0.0
+        else:
+            mem_per_req = 0.0
+    else:
+        mem_per_req = float(eff.get("memory_per_request", 0.0))
 
     # Energy per completed request (J/req): integrate cluster.power over the
     # run, divide by completed count. Approximated as mean(power) * duration.
+    # Per-service: allocate cluster energy proportionally to the service's
+    # share of running CPU-seconds.
     metrics_csv = seed.get("metrics")
     power_per_req = 0.0
     if (metrics_csv is not None
             and "cluster.power" in metrics_csv.columns
             and "time" in metrics_csv.columns
             and len(metrics_csv) > 1):
-        completed_n = float(r.get("completed", 0))
+        if service is None:
+            completed_n = float(r.get("completed", 0))
+        else:
+            completed_n = float(((trace["service_id"] == service)
+                                 & (trace["status"] == "completed")).sum()
+                                if trace is not None else 0)
         if completed_n > 0:
             mean_w = float(pd.to_numeric(metrics_csv["cluster.power"], errors="coerce").mean())
             t = pd.to_numeric(metrics_csv["time"], errors="coerce")
             duration = float(t.max() - t.min())
-            power_per_req = mean_w * duration / completed_n
+            total_energy = mean_w * duration
+
+            if service is not None:
+                # Allocate by CPU-second share
+                svc_col = f"lifecycle.{service}.running_cpu_seconds"
+                tot_col = "lifecycle.running_cpu_seconds"
+                if svc_col in metrics_csv.columns and tot_col in metrics_csv.columns:
+                    svc_cpu = float(pd.to_numeric(metrics_csv[svc_col], errors="coerce").max())
+                    tot_cpu = float(pd.to_numeric(metrics_csv[tot_col], errors="coerce").max())
+                    share = (svc_cpu / tot_cpu) if tot_cpu > 0 else 0.0
+                    total_energy *= share
+
+            power_per_req = total_energy / completed_n
 
     return {
         "cold_starts": cold_starts,
