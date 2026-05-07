@@ -41,6 +41,10 @@
             "service_bound": true
           }
         ]
+      },
+      "service_time": {
+        "mode": "fixed",
+        "duration": 0.1
       }
     }
   ],
@@ -60,9 +64,5 @@
   "monitoring": {
     "interval": 1.0,
     "max_history_length": 1000
-  },
-  "service_time": {
-    "mode": "fixed",
-    "duration": 0.1
   }
 }

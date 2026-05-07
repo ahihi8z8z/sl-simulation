@@ -1,9 +1,11 @@
 """Service time providers — determine execution duration per request.
 
-Configured via ``config["service_time"]``:
+Configured per-service via ``services[i].service_time``:
 
     {"mode": "fixed", "duration": 0.45}
     {"mode": "sample_csv", "csv_path": "data/durations.csv"}
+
+Omitted → defaults to FixedServiceTime(0.1).
 
 The provider's ``assign()`` is called by generators after creating
 each Invocation, setting ``inv.service_time`` before dispatch.
@@ -67,9 +69,9 @@ class SampleCsvServiceTime(BaseServiceTimeProvider):
         inv.service_time = self._durations[rng.integers(len(self._durations))]
 
 
-def create_service_time_provider(config: dict) -> BaseServiceTimeProvider:
-    """Create a provider from config["service_time"] dict."""
-    st_cfg = config.get("service_time", {})
+def create_service_time_provider(svc_cfg: dict) -> BaseServiceTimeProvider:
+    """Create a provider from a single ``services[i].service_time`` dict."""
+    st_cfg = svc_cfg.get("service_time", {})
     mode = st_cfg.get("mode", "fixed")
 
     if mode == "fixed":

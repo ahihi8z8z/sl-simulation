@@ -45,16 +45,15 @@ SLOW_SERVICE_CONFIG = {
     "services": [
         {
             "service_id": "svc-slow",
-            # 2s service time configured via service_time provider
             "lifecycle": LIFECYCLE_256_1,
             "workload": {"arrival_rate": 5.0},
+            "service_time": {"mode": "fixed", "duration": 2.0},
         }
     ],
     "cluster": {
         "nodes": [{"node_id": "node-0", "cpu_capacity": 8.0, "memory_capacity": 8192}]
     },
     "monitoring": {"interval": 1.0, "max_history_length": 100},
-    "service_time": {"mode": "fixed", "duration": 2.0},
 }
 
 
@@ -67,7 +66,11 @@ def _make_ctx(config, seed=42):
     run_dir = tempfile.mkdtemp(prefix="test_drain_")
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir=run_dir)
     from serverless_sim.workload.service_time import FixedServiceTime
-    ctx.service_time_provider = FixedServiceTime(duration=2.0)
+    _provider = FixedServiceTime(duration=2.0)
+
+    for _svc in ctx.config.get("services", []):
+
+        ctx.service_time_providers[_svc["service_id"]] = _provider
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)

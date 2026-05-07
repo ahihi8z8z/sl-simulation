@@ -36,8 +36,9 @@ class BaseGenerator:
             arrival_time=ctx.env.now,
             status="arrived",
         )
-        if ctx.service_time_provider is not None:
-            ctx.service_time_provider.assign(inv, self._rng)
+        provider = ctx.service_time_providers.get(service.service_id)
+        if provider is not None:
+            provider.assign(inv, self._rng)
         ctx.request_table[request_id] = inv
         return inv
 

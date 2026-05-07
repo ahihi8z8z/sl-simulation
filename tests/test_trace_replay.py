@@ -79,9 +79,10 @@ def _make_ctx(config, tmpdir):
     ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir=tmpdir)
     ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
 
-    # Service time provider
+    # Per-service service time providers
     from serverless_sim.workload.service_time import create_service_time_provider
-    ctx.service_time_provider = create_service_time_provider(config)
+    for svc_cfg in config.get("services", []):
+        ctx.service_time_providers[svc_cfg["service_id"]] = create_service_time_provider(svc_cfg)
 
     ctx.workload_manager = WorkloadManager.from_config(ctx)
     ctx.lifecycle_manager = LifecycleManager(ctx)

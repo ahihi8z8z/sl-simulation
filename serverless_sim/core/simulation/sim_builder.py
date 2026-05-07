@@ -40,9 +40,11 @@ class SimulationBuilder:
             run_dir=run_dir,
         )
 
-        # Service time provider
+        # Per-service service-time providers
         from serverless_sim.workload.service_time import create_service_time_provider
-        ctx.service_time_provider = create_service_time_provider(config)
+        for svc_cfg in config.get("services", []):
+            svc_id = svc_cfg["service_id"]
+            ctx.service_time_providers[svc_id] = create_service_time_provider(svc_cfg)
 
         # Cluster
         ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)

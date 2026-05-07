@@ -28,7 +28,7 @@ class SimContext:
     controller: Optional[Any] = None
     export_manager: Optional[Any] = None
     placement_strategy: Optional[Any] = None
-    service_time_provider: Optional[Any] = None
+    service_time_providers: dict[str, Any] = field(default_factory=dict)
 
     # Central request store (replaces plain dict for memory efficiency)
     request_table: RequestStore = field(default_factory=RequestStore)

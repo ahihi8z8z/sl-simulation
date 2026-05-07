@@ -297,7 +297,11 @@ class TestSimulationWithCsvModel:
         logger.setLevel(logging.WARNING)
 
         ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir=tmpdir)
-        ctx.service_time_provider = FixedServiceTime(duration=0.1)
+        _provider = FixedServiceTime(duration=0.1)
+
+        for _svc in ctx.config.get("services", []):
+
+            ctx.service_time_providers[_svc["service_id"]] = _provider
         ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
         ctx.workload_manager = WorkloadManager.from_config(ctx)
         ctx.lifecycle_manager = LifecycleManager(ctx)
@@ -345,7 +349,11 @@ class TestSimulationWithCsvModel:
         logger.setLevel(logging.WARNING)
 
         ctx = SimContext(env=env, config=config, rng=rng, logger=logger, run_dir=tmpdir)
-        ctx.service_time_provider = FixedServiceTime(duration=0.1)
+        _provider = FixedServiceTime(duration=0.1)
+
+        for _svc in ctx.config.get("services", []):
+
+            ctx.service_time_providers[_svc["service_id"]] = _provider
         ctx.cluster_manager = ClusterManager(env=env, config=config, logger=logger)
         ctx.workload_manager = WorkloadManager.from_config(ctx)
         ctx.lifecycle_manager = LifecycleManager(ctx)

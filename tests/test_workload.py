@@ -59,7 +59,11 @@ def _make_ctx(duration: float = 10.0, seed: int = 42) -> SimContext:
         logger=logger,
         run_dir="/tmp/test_run",
     )
-    ctx.service_time_provider = FixedServiceTime(duration=0.1)
+    _provider = FixedServiceTime(duration=0.1)
+
+    for _svc in ctx.config.get("services", []):
+
+        ctx.service_time_providers[_svc["service_id"]] = _provider
     return ctx
 
 
