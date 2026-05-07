@@ -47,6 +47,10 @@ COMPUTED_METRICS = {
     "computed.drop_ratio": ("request.dropped", "request.total", 0.0),
     "computed.*.cold_start_ratio": ("request.*.cold_starts", "request.*.total", 0.0),
     "computed.*.drop_ratio": ("request.*.dropped", "request.*.total", 0.0),
+    # Step latency: avg latency over requests completed in the last step
+    # = d(latency_sum) / d(completed)
+    "computed.latency_mean_step": ("request.latency_sum", "request.completed", 0.0),
+    "computed.*.latency_mean_step": ("request.*.latency_sum", "request.*.completed", 0.0),
     # Per-pod utilization (DRe-SCale style): running / allocated, per service.
     "computed.*.cpu_util_per_pod_step": (
         "lifecycle.*.running_cpu_seconds", "lifecycle.*.total_cpu_seconds", 0.0,

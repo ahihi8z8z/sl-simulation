@@ -30,6 +30,7 @@ class RequestCollector(BaseCollector):
             "request.in_flight": store.active_count,
         }
 
+        metrics["request.latency_sum"] = store._latency_sum
         if c.completed > 0:
             metrics["request.latency_mean"] = store.latency_mean
 
@@ -41,6 +42,9 @@ class RequestCollector(BaseCollector):
             metrics[f"request.{svc_id}.cold_starts"] = sc.cold_starts
             metrics[f"request.{svc_id}.truncated"] = sc.truncated
             metrics[f"request.{svc_id}.in_flight"] = store._per_service_active.get(svc_id, 0)
+            metrics[f"request.{svc_id}.latency_sum"] = (
+                store._per_service_latency_sum.get(svc_id, 0.0)
+            )
             if sc.completed > 0:
                 metrics[f"request.{svc_id}.latency_mean"] = (
                     store._per_service_latency_sum.get(svc_id, 0.0) / sc.completed
