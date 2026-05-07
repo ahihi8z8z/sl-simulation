@@ -370,8 +370,8 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str,
                       service: str | None = None) -> None:
     """Line chart per group: pool_target lines + idle window (twin axis).
 
-    Cluster-wide (service=None): finds first matching pool_target.<state>
-    column (any service). Per-service: filters to ``autoscaling.<service>.*``.
+    Cluster-wide (service=None): sums pool_target.<state> across all
+    services. Per-service: filters to ``autoscaling.<service>.*``.
     """
     n_runs = len(groups)
     fig, axes = plt.subplots(n_runs, 1, figsize=(12, 3.5 * n_runs), sharex=True)
@@ -395,15 +395,14 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str,
         else:
             cols_in_scope = all_cols
 
-        target_cols = {}
+        # Per-state: collect ALL matching cols (cluster-wide sums them; per-service has at most 1)
+        target_cols_by_state: dict[str, list[str]] = {}
         for state in ("prewarm", "warm"):
-            for col in cols_in_scope:
-                if f"pool_target.{state}" in col:
-                    target_cols[state] = col
-                    break
-        idle_col = next((c for c in cols_in_scope if "idle_timeout" in c), None)
+            target_cols_by_state[state] = [c for c in cols_in_scope
+                                           if f"pool_target.{state}" in c]
+        idle_cols = [c for c in cols_in_scope if "idle_timeout" in c]
 
-        wanted = list(target_cols.values()) + ([idle_col] if idle_col else [])
+        wanted = [c for cols in target_cols_by_state.values() for c in cols] + idle_cols
         result = _hourly_mean_across_seeds(group["seeds"], wanted)
         if result is None:
             continue
@@ -418,18 +417,22 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str,
             min_inst = max(min_inst, svc_data.get("min_instances", 0))
 
         for state, color in [("prewarm", "#2196F3"), ("warm", "#F44336")]:
-            col = target_cols.get(state)
-            if col is not None and col in hourly.columns:
-                values = hourly[col].values.copy()
-                if state == "warm":
-                    values = values + min_inst
-                ax.plot(time_hours, values, label=f"target({state})",
-                        color=color, linewidth=1.5)
+            cols = [c for c in target_cols_by_state.get(state, []) if c in hourly.columns]
+            if not cols:
+                continue
+            # Sum across services (cluster-wide); per-service has just one column.
+            values = hourly[cols].sum(axis=1).values.copy()
+            if state == "warm":
+                values = values + min_inst
+            ax.plot(time_hours, values, label=f"target({state})",
+                    color=color, linewidth=1.5)
 
         ax2 = None
-        if idle_col is not None and idle_col in hourly.columns:
+        idle_cols_present = [c for c in idle_cols if c in hourly.columns]
+        if idle_cols_present:
+            # Idle timeout is per-service config, not a sum; show the mean across services.
             ax2 = ax.twinx()
-            ax2.plot(time_hours, hourly[idle_col].values / 60.0,
+            ax2.plot(time_hours, hourly[idle_cols_present].mean(axis=1).values / 60.0,
                      color="#9C27B0", linewidth=1.2, alpha=0.8,
                      linestyle="--", label="idle window")
             ax2.set_ylabel("Idle window (min)", fontsize=8)
