@@ -46,7 +46,13 @@ def _load_group(run_dir: str) -> list[pd.DataFrame]:
 def _component_cols(dfs: list[pd.DataFrame]) -> list[str]:
     cols: set[str] = set()
     for df in dfs:
-        cols.update(c for c in df.columns if c.startswith("rc_") or c == "reward")
+        for c in df.columns:
+            if not (c.startswith("rc_") or c == "reward"):
+                continue
+            # Skip non-numeric (e.g. rc_services stringified dict)
+            if not pd.api.types.is_numeric_dtype(df[c]):
+                continue
+            cols.add(c)
     return sorted(cols)
 
 
@@ -105,14 +111,42 @@ def _per_step_mean(dfs: list[pd.DataFrame], col: str) -> tuple[np.ndarray, np.nd
     return mean, std
 
 
+def _auto_peak_steps(groups: list[list[pd.DataFrame]], col: str = "rc_d_total") -> list[int]:
+    """Infer bursty traffic steps from the first group that has rc_d_total."""
+    for dfs in groups:
+        mean, _ = _per_step_mean(dfs, col)
+        if mean.size == 0:
+            continue
+
+        finite = mean[np.isfinite(mean)]
+        if finite.size == 0:
+            continue
+
+        median = float(np.median(finite))
+        mad = float(np.median(np.abs(finite - median)))
+        threshold = median + 3.0 * mad
+        if mad == 0:
+            threshold = float(np.mean(finite) + np.std(finite))
+
+        peak_mask = mean > threshold
+        peak_count = int(np.sum(peak_mask))
+        if peak_count == 0 or peak_count >= mean.size / 2:
+            continue
+
+        return [i + 1 for i, is_peak in enumerate(peak_mask) if is_peak]
+
+    return []
+
+
 def plot_curves(groups: list[list[pd.DataFrame]], labels: list[str],
                 cols: list[str], output_dir: str, smooth: int = 1) -> None:
     """Per-step mean curves (averaged across episodes within group)."""
     n = len(cols)
     ncols = min(2, n)
     nrows = (n + ncols - 1) // ncols
-    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 3.2 * nrows),
+    fig, axes = plt.subplots(nrows, ncols, figsize=(7 * ncols, 3.4 * nrows),
                              squeeze=False)
+    peak_steps = _auto_peak_steps(groups)
 
     for ci, col in enumerate(cols):
         ax = axes[ci // ncols][ci % ncols]
@@ -120,15 +154,22 @@ def plot_curves(groups: list[list[pd.DataFrame]], labels: list[str],
             mean, _ = _per_step_mean(dfs, col)
             if mean.size == 0:
                 continue
+            steps = np.arange(1, mean.size + 1)
             if smooth > 1 and mean.size >= smooth:
                 kernel = np.ones(smooth) / smooth
                 mean = np.convolve(mean, kernel, mode="same")
-            ax.plot(mean, label=label, color=COLORS[gi % len(COLORS)],
+            color = COLORS[gi % len(COLORS)]
+            ax.step(steps, mean, where="mid", label=label, color=color,
                     linewidth=1.2, alpha=0.9)
+            ax.scatter(steps, mean, s=8, color=color, alpha=0.75,
+                       linewidths=0)
+        for step in peak_steps:
+            ax.axvspan(step - 0.5, step + 0.5, color="red",
+                       alpha=0.06, linewidth=0)
         ax.set_title(col, fontsize=10)
         ax.set_xlabel("step")
         ax.axhline(0, color="black", linewidth=0.4, alpha=0.5)
-        ax.grid(alpha=0.3)
+        ax.grid(alpha=0.25)
         if ci == 0:
             ax.legend(fontsize=8)
 

@@ -91,19 +91,33 @@ def _seed_scalar_metrics(seed: dict, service: str | None = None) -> dict:
     eff = s.get("effective_resource_ratio", {})
 
     trace = seed.get("trace")
+    # prewarm_hit (heuristic): cold_start==False AND execution_start_time > dispatch_time
+    # → request hit a prewarm pool pod that needed promotion to warm.
+    def _split_hits(t: pd.DataFrame) -> tuple[float, float]:
+        if t is None or len(t) == 0 or "cold_start" not in t.columns:
+            return 0.0, 0.0
+        cold = float(t["cold_start"].sum())
+        non_cold = t[t["cold_start"] == False]
+        if len(non_cold) == 0 or "dispatch_time" not in t.columns:
+            return cold, 0.0
+        delta = non_cold["execution_start_time"] - non_cold["dispatch_time"]
+        prewarm = float((delta > 1e-9).sum())
+        return cold, prewarm
+
     if service is not None:
         if trace is not None and len(trace) > 0:
             t = trace[trace["service_id"] == service]
-            cold_starts = float(t["cold_start"].sum()) if "cold_start" in t.columns else 0.0
+            cold_starts, prewarm_hits = _split_hits(t)
             drops = float((t["status"] == "dropped").sum())
             completed = t[t["status"] == "completed"]
             latencies = completed["execution_start_time"] - completed["arrival_time"]
             avg_lat = float(latencies.mean() * 1000.0) if len(latencies) > 0 else 0.0
         else:
-            cold_starts, drops, avg_lat = 0.0, 0.0, 0.0
+            cold_starts, prewarm_hits, drops, avg_lat = 0.0, 0.0, 0.0, 0.0
     else:
         cold_starts = float(r.get("cold_starts", 0))
         drops = float(r.get("dropped", 0))
+        _, prewarm_hits = _split_hits(trace)
         if trace is not None and len(trace) > 0:
             completed = trace[trace["status"] == "completed"]
             latencies = completed["execution_start_time"] - completed["arrival_time"]
@@ -162,6 +176,7 @@ def _seed_scalar_metrics(seed: dict, service: str | None = None) -> dict:
 
     return {
         "cold_starts": cold_starts,
+        "prewarm_hits": prewarm_hits,
         "drops": drops,
         "avg_lat": avg_lat,
         "mem_per_req": mem_per_req,
@@ -187,12 +202,13 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str,
     The mem_per_req and power_per_req panels show cluster-wide values
     (per-service breakdown not tracked in summary / system_metrics).
     """
-    keys = ["cold_starts", "drops", "avg_lat", "mem_per_req", "power_per_req"]
+    keys = ["cold_starts", "prewarm_hits", "drops", "avg_lat", "mem_per_req", "power_per_req"]
     agg = [_aggregate_group(g, keys, service=service) for g in groups]
 
     def vals(k): return [a[k][0] for a in agg], [a[k][1] for a in agg]
 
     cold_m, cold_s = vals("cold_starts")
+    pre_m, pre_s   = vals("prewarm_hits")
     drop_m, drop_s = vals("drops")
     lat_m, lat_s   = vals("avg_lat")
     mem_m, mem_s   = vals("mem_per_req")
@@ -203,23 +219,28 @@ def plot_metrics_bar(groups: list[dict], labels: list[str], output_dir: str,
     colors = [COLORS[i % len(COLORS)] for i in range(n_runs)]
     x = np.arange(n_runs)
 
-    # (0,0) grouped bar: cold starts / drops
+    # (0,0) grouped bar: cold / prewarm_hit / drop
     ax = axes[0, 0]
-    w = 0.4
-    bars_c = ax.bar(x - w / 2, cold_m, w, yerr=cold_s, color=colors, alpha=0.85,
+    w = 0.27
+    bars_c = ax.bar(x - w, cold_m, w, yerr=cold_s, color=colors, alpha=0.85,
                     edgecolor="black", linewidth=0.5, capsize=3,
                     error_kw={"elinewidth": 0.8})
-    bars_d = ax.bar(x + w / 2, drop_m, w, yerr=drop_s, color=colors, alpha=0.85,
+    bars_p = ax.bar(x, pre_m, w, yerr=pre_s, color=colors, alpha=0.85,
+                    edgecolor="black", linewidth=0.5, hatch="..", capsize=3,
+                    error_kw={"elinewidth": 0.8})
+    bars_d = ax.bar(x + w, drop_m, w, yerr=drop_s, color=colors, alpha=0.85,
                     edgecolor="black", linewidth=0.5, hatch="//", capsize=3,
                     error_kw={"elinewidth": 0.8})
     ax.bar_label(bars_c, fmt="%.0f", fontsize=7)
+    ax.bar_label(bars_p, fmt="%.0f", fontsize=7)
     ax.bar_label(bars_d, fmt="%.0f", fontsize=7)
-    ax.set_title("Cold / Dropped (requests)", fontsize=11)
+    ax.set_title("Cold / Prewarm-hit / Dropped (requests)", fontsize=11)
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=8)
     from matplotlib.patches import Patch
     legend_handles = [
         Patch(facecolor="lightgray", edgecolor="black", label="Cold Start"),
+        Patch(facecolor="lightgray", edgecolor="black", hatch="..", label="Prewarm Hit"),
         Patch(facecolor="lightgray", edgecolor="black", hatch="//", label="Dropped"),
     ]
     ax.legend(handles=legend_handles, fontsize=8)

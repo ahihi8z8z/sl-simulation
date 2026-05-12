@@ -150,6 +150,36 @@ def main() -> None:
     print(f"  aggregate   : {agg_path}")
     print(f"  replay      : {replay_path}")
 
+    # Plot: full + zoom on first hour, 30s bins
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    ts = np.sort(replay_df["timestamp"].to_numpy())
+    bin_s = 30
+    sim_dur_s = args.duration * 60
+    zooms = [(f"Full ({args.duration} min)", sim_dur_s), ("First hour", 3600)]
+
+    fig, axes = plt.subplots(len(zooms), 1, figsize=(13, 6))
+    if len(zooms) == 1:
+        axes = [axes]
+    for ax, (zlabel, win) in zip(axes, zooms):
+        sel = ts[ts < win]
+        edges = np.arange(0, win + bin_s, bin_s)
+        counts, _ = np.histogram(sel, bins=edges)
+        x = (edges[:-1] + bin_s / 2) / 60.0
+        ax.plot(x, counts, linewidth=0.8, color="#2196F3", alpha=0.9)
+        ax.fill_between(x, counts, alpha=0.2, color="#2196F3")
+        ax.set_title(f"{zlabel} — req/30s (n={sel.size}, max={counts.max() if len(counts) else 0}, mean={counts.mean():.1f})")
+        ax.set_xlabel("time (min)")
+        ax.set_ylabel("reqs / 30s")
+        ax.grid(alpha=0.3)
+    plt.tight_layout()
+    plot_path = out_dir / f"{stem}.png"
+    fig.savefig(plot_path, dpi=130)
+    plt.close(fig)
+    print(f"  plot        : {plot_path}")
+
 
 if __name__ == "__main__":
     main()
