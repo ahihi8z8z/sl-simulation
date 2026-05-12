@@ -64,11 +64,6 @@ class MultiActionMapper:
                 "MultiActionMapper: control_pool_target and control_idle_timeout "
                 "are both False — agent would have no controllable action."
             )
-        if softmax and not control_pool_target:
-            raise ValueError(
-                "MultiActionMapper: softmax only makes sense for pool_target "
-                "allocation; with control_pool_target=False use discrete actions."
-            )
         self.service_ids = service_ids
         self.pool_states = pool_states
         self.pool_target_max = pool_target_max
