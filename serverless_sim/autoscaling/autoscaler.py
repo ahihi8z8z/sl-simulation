@@ -32,7 +32,10 @@ class OpenWhiskPoolAutoscaler:
         self._max_instances: dict[str, int] = {}
 
         # Per-service parameters (controller/policy-managed)
-        self._idle_timeout: dict[str, float] = {}
+        # idle_timeouts[svc_id][state] = timeout (seconds). A pod idle for
+        # that long in `state` is demoted to the previous step in the
+        # cold-start chain (or evicted if state is the bottom).
+        self._idle_timeouts: dict[str, dict[str, float]] = {}
         self._pool_targets: dict[str, dict[str, int]] = {}
 
         # Pending instances: scheduled but not yet created by SimPy
@@ -45,7 +48,15 @@ class OpenWhiskPoolAutoscaler:
 
             self._min_instances[svc.service_id] = svc.min_instances
             self._max_instances[svc.service_id] = svc.max_instances
-            self._idle_timeout[svc.service_id] = defaults.get("idle_timeout", 60.0)
+            it_cfg = defaults.get("idle_timeout", {})
+            if not isinstance(it_cfg, dict):
+                raise ValueError(
+                    f"services[{svc.service_id}].autoscaling_defaults.idle_timeout "
+                    f"must be a dict mapping state -> seconds, got {type(it_cfg).__name__}"
+                )
+            self._idle_timeouts[svc.service_id] = {
+                state: float(v) for state, v in it_cfg.items()
+            }
             self._pool_targets[svc.service_id] = dict(defaults.get("pool_targets", {}))
 
     def _find_service_config(self, service_id: str) -> dict | None:
@@ -82,7 +93,9 @@ class OpenWhiskPoolAutoscaler:
     def handle_idle_timeout(self, instance) -> None:
         """Called by lifecycle manager when idle timer fires.
 
-        Demand containers → evict. Pool containers → demote to pool_state.
+        Pool pods: demote back to pool_state (single-shot, as before).
+        Demand pods: step one notch down the cold-start chain. From the
+        bottom (or any non-chain state) → evict.
         """
         lm = self.ctx.lifecycle_manager
         if not instance.is_idle or instance.evicted:
@@ -90,8 +103,20 @@ class OpenWhiskPoolAutoscaler:
         if instance.is_pool_container:
             if instance.pool_state != instance.state:
                 lm.demote_to_pool_state(instance)
-        else:
+            return
+
+        sm = self.ctx.workload_manager.services[instance.service_id].state_machine
+        chain = sm.get_cold_start_path()  # e.g. ["null", "prewarm", "warm"]
+        try:
+            idx = chain.index(instance.state)
+        except ValueError:
             lm.evict_instance(instance)
+            return
+        if idx <= 1:
+            # Already at the lowest idleable state — evict.
+            lm.evict_instance(instance)
+        else:
+            lm.demote_one_step(instance, chain[idx - 1])
 
     # ------------------------------------------------------------------
     # Pool fill (only on explicit API calls)
@@ -395,8 +420,13 @@ class OpenWhiskPoolAutoscaler:
     # Idle timeout
     # ------------------------------------------------------------------
 
-    def get_idle_timeout(self, service_id: str) -> float:
-        return self._idle_timeout.get(service_id, 60.0)
+    def get_idle_timeout(self, service_id: str, state: str) -> float:
+        """Return idle timeout for pods in ``state``. None/negative if never."""
+        return self._idle_timeouts.get(service_id, {}).get(state, -1.0)
 
-    def set_idle_timeout(self, service_id: str, value: float) -> None:
-        self._idle_timeout[service_id] = value
+    def get_idle_timeouts(self, service_id: str) -> dict[str, float]:
+        """Return the full {state: timeout} dict."""
+        return dict(self._idle_timeouts.get(service_id, {}))
+
+    def set_idle_timeout(self, service_id: str, state: str, value: float) -> None:
+        self._idle_timeouts.setdefault(service_id, {})[state] = float(value)

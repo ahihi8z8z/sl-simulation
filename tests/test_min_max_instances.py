@@ -164,7 +164,7 @@ class TestMinInstances:
         ctx = _make_ctx(config)
         autoscaler = _setup_autoscaler(ctx, reconcile_interval=1.0)
         # Set very short idle timeout
-        autoscaler.set_idle_timeout("svc-a", 0.1)
+        autoscaler.set_idle_timeout("svc-a", "warm", 0.1)
 
         ctx.cluster_manager.start_all()
         autoscaler.start()

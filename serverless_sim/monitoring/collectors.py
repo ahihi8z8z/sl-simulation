@@ -207,7 +207,8 @@ class AutoscalingCollector(BaseCollector):
         metrics = {}
         am = ctx.autoscaling_manager
         for svc_id in ctx.workload_manager.services:
-            metrics[f"autoscaling.{svc_id}.idle_timeout"] = am.get_idle_timeout(svc_id)
+            for state, timeout in am.get_idle_timeouts(svc_id).items():
+                metrics[f"autoscaling.{svc_id}.idle_timeout.{state}"] = timeout
             max_inst = am.get_max_instances(svc_id)
             current = am._count_total_instances(svc_id)
             metrics[f"autoscaling.{svc_id}.remaining_capacity"] = max(0, max_inst - current)

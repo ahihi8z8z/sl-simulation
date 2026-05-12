@@ -105,7 +105,7 @@ class SummaryWriter:
                     autoscaling[svc_id] = {
                         "min_instances": self.ctx.autoscaling_manager.get_min_instances(svc_id),
                         "max_instances": self.ctx.autoscaling_manager.get_max_instances(svc_id),
-                        "idle_timeout": self.ctx.autoscaling_manager.get_idle_timeout(svc_id),
+                        "idle_timeout": self.ctx.autoscaling_manager.get_idle_timeouts(svc_id),
                         "current_instances": self.ctx.autoscaling_manager._count_total_instances(svc_id),
                         "alive_instances": self.ctx.autoscaling_manager._count_alive_instances(svc_id),
                         "pool_targets": self.ctx.autoscaling_manager.get_all_pool_targets(svc_id),

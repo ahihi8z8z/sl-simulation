@@ -56,6 +56,7 @@ class MultiActionMapper:
         delta_max: int = 0,
         softmax: bool = False,
         control_idle_timeout: bool = True,
+        idle_timeout_states: list[str] | None = None,
     ):
         self.service_ids = service_ids
         self.pool_states = pool_states
@@ -64,9 +65,12 @@ class MultiActionMapper:
         self.delta_max = delta_max
         self.softmax = softmax
         self.control_idle_timeout = control_idle_timeout
+        # States with their own idle timeout dim. Default: just "warm".
+        self.idle_timeout_states = list(idle_timeout_states) if idle_timeout_states else ["warm"]
+        n_idle = len(self.idle_timeout_states) if control_idle_timeout else 0
 
         if softmax:
-            # Layout per service: [total, (logits if N>1), (idle_timeout)].
+            # Layout per service: [total, (logits if N>1), (idle_timeout per state)].
             # N=1 skips logits — softmax of 1 element is always [1.0], so a
             # lone logit is a dead action dim that just wastes exploration.
             self._softmax_layout: list[tuple[str, list[str]]] = []
@@ -75,10 +79,10 @@ class MultiActionMapper:
                 states = pool_states.get(svc_id, ["prewarm"])
                 self._softmax_layout.append((svc_id, states))
                 n = len(states)
-                n_dims += 1 + (n if n > 1 else 0) + (1 if control_idle_timeout else 0)
+                n_dims += 1 + (n if n > 1 else 0) + n_idle
             self.n_dims = n_dims
         else:
-            # Discrete layout: [pool_state_1, ..., (idle_timeout)] per service
+            # Discrete layout: [pool_state_1, ..., (idle_timeout per state)] per service
             self.dimensions: list[int] = []
             self._action_map: list[tuple[str, str, str | None]] = []
             for svc_id in service_ids:
@@ -87,8 +91,9 @@ class MultiActionMapper:
                     self.dimensions.append(pool_target_max + 1)
                     self._action_map.append((svc_id, "pool_target", state))
                 if control_idle_timeout:
-                    self.dimensions.append(idle_timeout_max_minutes + 1)
-                    self._action_map.append((svc_id, "idle_timeout", None))
+                    for idle_state in self.idle_timeout_states:
+                        self.dimensions.append(idle_timeout_max_minutes + 1)
+                        self._action_map.append((svc_id, "idle_timeout", idle_state))
             self.n_dimensions = len(self.dimensions)
 
     @property
@@ -131,7 +136,7 @@ class MultiActionMapper:
                     value = max(0, min(int(round(raw)), self.pool_target_max))
                 pool_updates.setdefault(svc_id, {})[state] = value
             elif action_type == "idle_timeout":
-                api.set_idle_timeout(svc_id, int(raw) * 60.0)
+                api.set_idle_timeout(svc_id, state, int(raw) * 60.0)
 
         for svc_id, targets in pool_updates.items():
             api.batch_set_pool_targets(svc_id, targets)
@@ -157,10 +162,11 @@ class MultiActionMapper:
             api.batch_set_pool_targets(svc_id, targets)
 
             if self.control_idle_timeout:
-                timeout_raw = float(raw[idx])
-                idx += 1
-                timeout_sec = (timeout_raw + 1.0) * 0.5 * self.idle_timeout_max_minutes * 60.0
-                api.set_idle_timeout(svc_id, max(0.0, timeout_sec))
+                for idle_state in self.idle_timeout_states:
+                    timeout_raw = float(raw[idx])
+                    idx += 1
+                    timeout_sec = (timeout_raw + 1.0) * 0.5 * self.idle_timeout_max_minutes * 60.0
+                    api.set_idle_timeout(svc_id, idle_state, max(0.0, timeout_sec))
 
 
 def _softmax(x: np.ndarray) -> np.ndarray:

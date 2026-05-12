@@ -65,7 +65,8 @@ class BaseController:
         value = action["value"]
 
         if act == "set_idle_timeout":
-            self.ctx.autoscaling_manager.set_idle_timeout(svc_id, value)
+            state = action["state"]
+            self.ctx.autoscaling_manager.set_idle_timeout(svc_id, state, value)
         elif act == "set_pool_target":
             state = action["state"]
             self.ctx.autoscaling_manager.set_pool_target(svc_id, state, value)

@@ -177,6 +177,7 @@ class ServerlessEnv(gym.Env):
             delta_max=self.gym_config.get("delta_max", 0),
             softmax=self.continuous_action,
             control_idle_timeout=self.gym_config.get("control_idle_timeout", True),
+            idle_timeout_states=self.gym_config.get("idle_timeout_states", ["warm"]),
         )
 
         reward_cfg = self.gym_config.get("reward", {})

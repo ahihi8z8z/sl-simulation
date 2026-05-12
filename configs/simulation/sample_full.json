@@ -11,7 +11,9 @@
       "min_instances": 2,
       "max_instances": 0,
       "autoscaling_defaults": {
-        "idle_timeout": 30.0,
+        "idle_timeout": {
+          "warm": 30.0
+        },
         "pool_targets": {
           "prewarm": 2
         }
@@ -75,7 +77,9 @@
       "min_instances": 1,
       "max_instances": 0,
       "autoscaling_defaults": {
-        "idle_timeout": 60.0,
+        "idle_timeout": {
+          "warm": 60.0
+        },
         "pool_targets": {
           "prewarm": 1,
           "code_loaded": 1

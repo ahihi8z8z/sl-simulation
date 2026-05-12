@@ -14,7 +14,7 @@ class BaseControlPolicy:
 
         Each action is a dict like:
             {"action": "set_pool_target", "service_id": "svc-a", "state": "prewarm", "value": 3}
-            {"action": "set_idle_timeout", "service_id": "svc-a", "value": 15.0}
+            {"action": "set_idle_timeout", "service_id": "svc-a", "state": "warm", "value": 15.0}
             {"action": "set_min_instances", "service_id": "svc-a", "value": 2}
             {"action": "set_max_instances", "service_id": "svc-a", "value": 10}
         """

@@ -48,10 +48,13 @@ class AutoscalingAPI:
     def get_demand_container_count(self, service_id: str) -> int:
         return self._autoscaler._count_demand_containers(service_id)
 
-    # -- Idle timeout --
+    # -- Per-state idle timeouts --
 
-    def get_idle_timeout(self, service_id: str) -> float:
-        return self._autoscaler.get_idle_timeout(service_id)
+    def get_idle_timeout(self, service_id: str, state: str) -> float:
+        return self._autoscaler.get_idle_timeout(service_id, state)
 
-    def set_idle_timeout(self, service_id: str, value: float) -> None:
-        self._autoscaler.set_idle_timeout(service_id, value)
+    def get_idle_timeouts(self, service_id: str) -> dict[str, float]:
+        return self._autoscaler.get_idle_timeouts(service_id)
+
+    def set_idle_timeout(self, service_id: str, state: str, value: float) -> None:
+        self._autoscaler.set_idle_timeout(service_id, state, value)

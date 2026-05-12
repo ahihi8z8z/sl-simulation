@@ -143,7 +143,7 @@ class TestAutoscaler:
 
         # Set pool target and short idle timeout via controller/policy API
         autoscaler.set_pool_target("svc-a", "prewarm", 2)
-        autoscaler.set_idle_timeout("svc-a", 2.0)
+        autoscaler.set_idle_timeout("svc-a", "warm", 2.0)
 
         ctx.cluster_manager.start_all()
         autoscaler.start()
@@ -181,9 +181,10 @@ class TestAutoscalingAPI:
         autoscaler = OpenWhiskPoolAutoscaler(ctx)
         api = AutoscalingAPI(autoscaler)
 
-        assert api.get_idle_timeout("svc-a") == 60.0  # default, not from service config
-        api.set_idle_timeout("svc-a", 10.0)
-        assert api.get_idle_timeout("svc-a") == 10.0
+        # No timeout configured for "warm" → returns -1 (never).
+        assert api.get_idle_timeout("svc-a", "warm") == -1.0
+        api.set_idle_timeout("svc-a", "warm", 10.0)
+        assert api.get_idle_timeout("svc-a", "warm") == 10.0
 
     def test_get_set_pool_target(self):
         ctx = _make_ctx(BASE_CONFIG)

@@ -350,12 +350,19 @@ class LifecycleManager:
         self._schedule_idle_check(instance)
 
     def _schedule_idle_check(self, instance: ContainerInstance) -> None:
-        """Schedule an idle timeout check for this container."""
+        """Schedule an idle timeout check for this container.
+
+        Timeout is looked up by the container's current state — different
+        states (warm, prewarm, ...) can have different timeouts.
+        Negative timeout → never evict from this state.
+        """
         if self.ctx.autoscaling_manager is None:
             return
-        timeout = self.ctx.autoscaling_manager.get_idle_timeout(instance.service_id)
+        timeout = self.ctx.autoscaling_manager.get_idle_timeout(
+            instance.service_id, instance.state,
+        )
         if timeout < 0:
-            return  # never evict
+            return  # never evict from this state
         gen = instance._idle_timer_gen
         self.ctx.env.process(self._idle_timer(instance, timeout, gen))
 
@@ -386,6 +393,25 @@ class LifecycleManager:
             "t=%.3f | DEMOTE | %s warm→%s on %s",
             self.ctx.env.now, instance.instance_id, instance.pool_state, node.node_id,
         )
+
+    def demote_one_step(self, instance: ContainerInstance, target_state: str) -> None:
+        """Step a demand container one notch down the cold-start chain.
+
+        Used by 2-stage idle timeout (e.g. warm → prewarm). Instant transition;
+        re-schedules an idle check in the new state.
+        """
+        if instance.is_pool_container or instance.evicted:
+            return
+        if target_state == instance.state:
+            return
+        node = self.ctx.cluster_manager.get_node(instance.node_id)
+        self._transition_state(node, instance, target_state)
+        self.logger.debug(
+            "t=%.3f | DEMOTE_STEP | %s →%s on %s",
+            self.ctx.env.now, instance.instance_id, target_state, node.node_id,
+        )
+        instance._idle_timer_gen += 1
+        self._schedule_idle_check(instance)
 
     # ------------------------------------------------------------------
     # Eviction

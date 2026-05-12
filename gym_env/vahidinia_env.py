@@ -180,7 +180,7 @@ class VahidiniaEnv(gym.Env):
             for i, svc_id in enumerate(self._service_ids):
                 a = float(np.clip(action[i] if i < len(action) else action[-1], -1.0, 1.0))
                 value = self.idle_timeout_min + (a + 1.0) * 0.5 * span
-                self._autoscaling_api.set_idle_timeout(svc_id, value)
+                self._autoscaling_api.set_idle_timeout(svc_id, "warm", value)
 
         # Advance simulation
         ctx = self._engine.ctx
