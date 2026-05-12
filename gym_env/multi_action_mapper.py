@@ -56,8 +56,19 @@ class MultiActionMapper:
         delta_max: int = 0,
         softmax: bool = False,
         control_idle_timeout: bool = True,
+        control_pool_target: bool = True,
         idle_timeout_states: list[str] | None = None,
     ):
+        if not control_pool_target and not control_idle_timeout:
+            raise ValueError(
+                "MultiActionMapper: control_pool_target and control_idle_timeout "
+                "are both False — agent would have no controllable action."
+            )
+        if softmax and not control_pool_target:
+            raise ValueError(
+                "MultiActionMapper: softmax only makes sense for pool_target "
+                "allocation; with control_pool_target=False use discrete actions."
+            )
         self.service_ids = service_ids
         self.pool_states = pool_states
         self.pool_target_max = pool_target_max
@@ -65,12 +76,13 @@ class MultiActionMapper:
         self.delta_max = delta_max
         self.softmax = softmax
         self.control_idle_timeout = control_idle_timeout
+        self.control_pool_target = control_pool_target
         # States with their own idle timeout dim. Default: just "warm".
         self.idle_timeout_states = list(idle_timeout_states) if idle_timeout_states else ["warm"]
         n_idle = len(self.idle_timeout_states) if control_idle_timeout else 0
 
         if softmax:
-            # Layout per service: [total, (logits if N>1), (idle_timeout per state)].
+            # Layout per service: [(total, (logits if N>1)) if pool, (idle_timeout per state)].
             # N=1 skips logits — softmax of 1 element is always [1.0], so a
             # lone logit is a dead action dim that just wastes exploration.
             self._softmax_layout: list[tuple[str, list[str]]] = []
@@ -79,17 +91,20 @@ class MultiActionMapper:
                 states = pool_states.get(svc_id, ["prewarm"])
                 self._softmax_layout.append((svc_id, states))
                 n = len(states)
-                n_dims += 1 + (n if n > 1 else 0) + n_idle
+                if control_pool_target:
+                    n_dims += 1 + (n if n > 1 else 0)
+                n_dims += n_idle
             self.n_dims = n_dims
         else:
-            # Discrete layout: [pool_state_1, ..., (idle_timeout per state)] per service
+            # Discrete layout per service: [(pool_state_1, ...) if pool, (idle_timeout per state)]
             self.dimensions: list[int] = []
             self._action_map: list[tuple[str, str, str | None]] = []
             for svc_id in service_ids:
                 states = pool_states.get(svc_id, ["prewarm"])
-                for state in states:
-                    self.dimensions.append(pool_target_max + 1)
-                    self._action_map.append((svc_id, "pool_target", state))
+                if control_pool_target:
+                    for state in states:
+                        self.dimensions.append(pool_target_max + 1)
+                        self._action_map.append((svc_id, "pool_target", state))
                 if control_idle_timeout:
                     for idle_state in self.idle_timeout_states:
                         self.dimensions.append(idle_timeout_max_minutes + 1)
@@ -143,23 +158,24 @@ class MultiActionMapper:
 
     def _apply_softmax(self, action, api: AutoscalingAPI) -> None:
         """Softmax allocation: action is Box(-1,1)^n_dims, laid out per service as
-        [total, (logits if N>1), (idle_timeout)]."""
+        [(total, (logits if N>1)) if pool, (idle_timeout per state)]."""
         raw = np.clip(np.asarray(action, dtype=np.float32).flatten(), -1.0, 1.0)
         idx = 0
         for svc_id, states in self._softmax_layout:
             n = len(states)
-            total_raw = float(raw[idx])
-            idx += 1
-            if n > 1:
-                props = _softmax(raw[idx : idx + n])
-                idx += n
-            else:
-                props = np.array([1.0])
+            if self.control_pool_target:
+                total_raw = float(raw[idx])
+                idx += 1
+                if n > 1:
+                    props = _softmax(raw[idx : idx + n])
+                    idx += n
+                else:
+                    props = np.array([1.0])
 
-            total = int(round((total_raw + 1.0) * 0.5 * self.pool_target_max))
-            counts = _largest_remainder(total, props)
-            targets = {state: int(counts[i]) for i, state in enumerate(states)}
-            api.batch_set_pool_targets(svc_id, targets)
+                total = int(round((total_raw + 1.0) * 0.5 * self.pool_target_max))
+                counts = _largest_remainder(total, props)
+                targets = {state: int(counts[i]) for i, state in enumerate(states)}
+                api.batch_set_pool_targets(svc_id, targets)
 
             if self.control_idle_timeout:
                 for idle_state in self.idle_timeout_states:
