@@ -112,6 +112,7 @@ class BaseLoadBalancer:
         invocation.assigned_node_id = node.node_id
         invocation.dispatch_time = self.ctx.env.now
         invocation.status = "dispatched"
+        self.ctx.request_table.record_warm_hit(invocation.service_id)
         self.ctx.lifecycle_manager.start_execution(instance, invocation)
         self.ctx.env.process(self._execute(invocation, node, instance))
 
@@ -126,6 +127,7 @@ class BaseLoadBalancer:
         invocation.dispatch_time = self.ctx.env.now
         invocation.status = "dispatched"
         instance.target_state = "warm"
+        self.ctx.request_table.record_prewarm_hit(invocation.service_id)
         self.ctx.env.process(self._promote_and_execute(invocation, node, instance))
 
     def _dispatch_cold_start(self, invocation: Invocation, node: Node, service) -> None:

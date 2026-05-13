@@ -26,6 +26,8 @@ class RequestCollector(BaseCollector):
             "request.completed": c.completed,
             "request.dropped": c.dropped,
             "request.cold_starts": c.cold_starts,
+            "request.warm_hits": c.warm_hits,
+            "request.prewarm_hits": c.prewarm_hits,
             "request.truncated": c.truncated,
             "request.in_flight": store.active_count,
         }
@@ -40,6 +42,8 @@ class RequestCollector(BaseCollector):
             metrics[f"request.{svc_id}.completed"] = sc.completed
             metrics[f"request.{svc_id}.dropped"] = sc.dropped
             metrics[f"request.{svc_id}.cold_starts"] = sc.cold_starts
+            metrics[f"request.{svc_id}.warm_hits"] = sc.warm_hits
+            metrics[f"request.{svc_id}.prewarm_hits"] = sc.prewarm_hits
             metrics[f"request.{svc_id}.truncated"] = sc.truncated
             metrics[f"request.{svc_id}.in_flight"] = store._per_service_active.get(svc_id, 0)
             metrics[f"request.{svc_id}.latency_sum"] = (

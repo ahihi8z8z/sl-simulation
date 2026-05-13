@@ -29,6 +29,9 @@ class RequestCounters:
     dropped: int = 0
     truncated: int = 0
     cold_starts: int = 0
+    # Dispatch breakdown (sum ≈ total - dropped - truncated):
+    warm_hits: int = 0     # dispatched to an existing warm pod (reuse)
+    prewarm_hits: int = 0  # dispatched to a pool/demand pod that needed promotion
 
 
 class RequestStore:
@@ -102,6 +105,14 @@ class RequestStore:
         if prev is not None:
             self._inter_arrival[svc] = inv.arrival_time - prev
         self._last_arrival[svc] = inv.arrival_time
+
+    def record_warm_hit(self, service_id: str) -> None:
+        self.counters.warm_hits += 1
+        self._svc_counters(service_id).warm_hits += 1
+
+    def record_prewarm_hit(self, service_id: str) -> None:
+        self.counters.prewarm_hits += 1
+        self._svc_counters(service_id).prewarm_hits += 1
 
     def finalize(self, inv: Invocation) -> None:
         """Record terminal state, stream to CSV, remove from memory."""

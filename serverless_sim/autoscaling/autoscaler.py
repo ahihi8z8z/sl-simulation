@@ -94,8 +94,12 @@ class OpenWhiskPoolAutoscaler:
         """Called by lifecycle manager when idle timer fires.
 
         Pool pods: demote back to pool_state (single-shot, as before).
-        Demand pods: step one notch down the cold-start chain. From the
-        bottom (or any non-chain state) → evict.
+        Demand pods: walk down the cold-start chain skipping any state
+        whose idle_timeout is 0 (instant pass-through). Stops at the first
+        state with a positive timeout (demote there), or evicts if it
+        reaches the bottom. Skipping pass-through states avoids a SimPy
+        same-tick race where a request could grab the pod in an
+        intermediate state before its 0-second timer fires.
         """
         lm = self.ctx.lifecycle_manager
         if not instance.is_idle or instance.evicted:
@@ -105,18 +109,25 @@ class OpenWhiskPoolAutoscaler:
                 lm.demote_to_pool_state(instance)
             return
 
-        sm = self.ctx.workload_manager.services[instance.service_id].state_machine
+        svc_id = instance.service_id
+        sm = self.ctx.workload_manager.services[svc_id].state_machine
         chain = sm.get_cold_start_path()  # e.g. ["null", "prewarm", "warm"]
         try:
             idx = chain.index(instance.state)
         except ValueError:
             lm.evict_instance(instance)
             return
-        if idx <= 1:
-            # Already at the lowest idleable state — evict.
-            lm.evict_instance(instance)
-        else:
-            lm.demote_one_step(instance, chain[idx - 1])
+
+        # Walk down chain, skipping pass-through (timeout==0) states.
+        target_idx = idx - 1
+        while target_idx >= 1:
+            next_state = chain[target_idx]
+            if self.get_idle_timeout(svc_id, next_state) > 0:
+                lm.demote_one_step(instance, next_state)
+                return
+            target_idx -= 1
+        # Bottom reached (or all intermediates were pass-through) — evict.
+        lm.evict_instance(instance)
 
     # ------------------------------------------------------------------
     # Pool fill (only on explicit API calls)

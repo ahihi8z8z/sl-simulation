@@ -23,11 +23,15 @@ CUMULATIVE_METRICS = {
     "request.completed",
     "request.dropped",
     "request.cold_starts",
+    "request.warm_hits",
+    "request.prewarm_hits",
     "request.total",
     "request.truncated",
     "request.*.completed",
     "request.*.dropped",
     "request.*.cold_starts",
+    "request.*.warm_hits",
+    "request.*.prewarm_hits",
     "request.*.total",
     "request.*.truncated",
     "lifecycle.instances_evicted",
@@ -45,8 +49,12 @@ CUMULATIVE_METRICS = {
 COMPUTED_METRICS = {
     "computed.cold_start_ratio": ("request.cold_starts", "request.total", 0.0),
     "computed.drop_ratio": ("request.dropped", "request.total", 0.0),
+    "computed.warm_hit_ratio": ("request.warm_hits", "request.total", 0.0),
+    "computed.prewarm_hit_ratio": ("request.prewarm_hits", "request.total", 0.0),
     "computed.*.cold_start_ratio": ("request.*.cold_starts", "request.*.total", 0.0),
     "computed.*.drop_ratio": ("request.*.dropped", "request.*.total", 0.0),
+    "computed.*.warm_hit_ratio": ("request.*.warm_hits", "request.*.total", 0.0),
+    "computed.*.prewarm_hit_ratio": ("request.*.prewarm_hits", "request.*.total", 0.0),
     # Step latency: avg latency over requests completed in the last step
     # = d(latency_sum) / d(completed)
     "computed.latency_mean_step": ("request.latency_sum", "request.completed", 0.0),
