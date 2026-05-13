@@ -135,13 +135,22 @@ class TraceReplayGenerator(BaseGenerator):
         service: ServiceClass,
         stop_time: float | None,
     ):
-        """SimPy process: emit requests at trace timestamps."""
+        """SimPy process: emit requests at trace timestamps.
+
+        Treats trace timestamps as relative to the moment replay starts —
+        i.e. record.timestamp = 0 fires at the current env.now (typically
+        after the warmup phase), not at sim t=0. This keeps the full
+        traffic pattern intact even when ``simulation.start_delay`` shifts
+        the replay start.
+        """
         ctx = self.ctx
         env = ctx.env
+        start_offset = env.now
 
         for record in self._records:
-            if record.timestamp > env.now:
-                yield env.timeout(record.timestamp - env.now)
+            target = start_offset + record.timestamp
+            if target > env.now:
+                yield env.timeout(target - env.now)
 
             if stop_time is not None and env.now >= stop_time:
                 ctx.logger.debug(
@@ -283,6 +292,9 @@ class AggregateTraceGenerator(BaseGenerator):
         ctx = self.ctx
         env = ctx.env
         rng = self._rng
+        # Trace timestamps are relative to the replay start (typically the
+        # end of the warmup phase), not to sim t=0.
+        start_offset = env.now
 
         for record in self._records:
             rate = record.count * self._scale / self.MINUTE_SECONDS
@@ -299,7 +311,7 @@ class AggregateTraceGenerator(BaseGenerator):
                 if t_local >= self.MINUTE_SECONDS:
                     break
 
-                target_time = minute_start + t_local
+                target_time = start_offset + minute_start + t_local
                 if target_time > env.now:
                     yield env.timeout(target_time - env.now)
 

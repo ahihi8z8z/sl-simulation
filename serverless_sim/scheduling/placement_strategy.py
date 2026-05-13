@@ -49,11 +49,22 @@ class BestFitPlacement(BasePlacementStrategy):
         if not candidates:
             return None
         return min(candidates, key=lambda n: n.capacity.memory - n.flavor_memory_used)
+        
+class FirstFitPlacement(BasePlacementStrategy):
+    """Pick the first node that can fit the service."""
+
+    def select_node(self, nodes: list[Node], service_id: str, ctx: SimContext) -> Node | None:
+        service = ctx.workload_manager.services[service_id]
+        for n in nodes:
+            if n.can_fit_flavor(service.peak_cpu, service.peak_memory):
+                return n
+        return None
 
 
 PLACEMENT_REGISTRY = {
     "best_fit": BestFitPlacement,
     "least_loaded": LeastLoadedPlacement,
+    "first_fit": FirstFitPlacement
 }
 
 
