@@ -421,8 +421,12 @@ class OpenWhiskPoolAutoscaler:
     # ------------------------------------------------------------------
 
     def get_idle_timeout(self, service_id: str, state: str) -> float:
-        """Return idle timeout for pods in ``state``. None/negative if never."""
-        return self._idle_timeouts.get(service_id, {}).get(state, -1.0)
+        """Return idle timeout for pods in ``state``.
+
+        Default 0 if not configured = evict/demote immediately on entering
+        this state. Use a positive value to keep, or rely on agent control.
+        """
+        return self._idle_timeouts.get(service_id, {}).get(state, 0.0)
 
     def get_idle_timeouts(self, service_id: str) -> dict[str, float]:
         """Return the full {state: timeout} dict."""

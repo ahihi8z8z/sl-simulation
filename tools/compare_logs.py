@@ -544,6 +544,73 @@ def plot_latency_cdf(groups: list[dict], labels: list[str], output_dir: str,
     print(f"  Saved: {fname}")
 
 
+def plot_events_over_time(groups: list[dict], labels: list[str], output_dir: str,
+                           service: str | None = None, bin_sec: float | None = None) -> None:
+    """3-panel time series: drops, cold-starts, prewarm-hits per bin.
+
+    Each panel shows one line per group (mean count per bin across seeds).
+    Bin width auto-picked from longest run; per-service filters by service_id.
+    """
+    # Pick bin: aim for ~50-200 bins
+    max_span = 0.0
+    for g in groups:
+        for s in g["seeds"]:
+            tr = s.get("trace")
+            if tr is not None and len(tr) > 0:
+                max_span = max(max_span, float(tr["arrival_time"].max()))
+    if max_span <= 0:
+        return
+    if bin_sec is None:
+        bin_sec = 60.0 if max_span > 3600 else 30.0 if max_span > 600 else 5.0
+
+    edges = np.arange(0, max_span + bin_sec, bin_sec)
+    centers_min = (edges[:-1] + bin_sec / 2) / 60.0
+
+    def _per_seed_counts(trace: pd.DataFrame, kind: str) -> np.ndarray:
+        if trace is None or len(trace) == 0:
+            return np.zeros(len(centers_min))
+        t = trace if service is None else trace[trace["service_id"] == service]
+        if kind == "drop":
+            t = t[t["status"] == "dropped"]
+        elif kind == "cold":
+            t = t[(t["cold_start"] == True)]
+        elif kind == "prewarm":
+            t = t[(t["cold_start"] == False)
+                  & ((t["execution_start_time"] - t["dispatch_time"]) > 1e-9)]
+        if len(t) == 0:
+            return np.zeros(len(centers_min))
+        counts, _ = np.histogram(t["arrival_time"].to_numpy(), bins=edges)
+        return counts.astype(float)
+
+    kinds = [("drop", "Dropped"), ("cold", "Cold start"), ("prewarm", "Prewarm hit")]
+    fig, axes = plt.subplots(len(kinds), 1, figsize=(12, 3.0 * len(kinds)), sharex=True)
+    if len(kinds) == 1:
+        axes = [axes]
+
+    for ax, (kind, title) in zip(axes, kinds):
+        for gi, (group, label) in enumerate(zip(groups, labels)):
+            per_seed = [_per_seed_counts(s.get("trace"), kind) for s in group["seeds"]]
+            if not per_seed:
+                continue
+            mean = np.mean(per_seed, axis=0)
+            ax.plot(centers_min, mean, label=f"{label} (mean={mean.sum():.0f})",
+                    color=COLORS[gi % len(COLORS)], linewidth=1.2, alpha=0.9)
+        ax.set_title(f"{title} per {bin_sec:.0f}s bin", fontsize=11)
+        ax.set_ylabel("count")
+        ax.grid(alpha=0.3)
+        ax.legend(fontsize=8)
+    axes[-1].set_xlabel("time (min)")
+
+    if service:
+        fig.suptitle(f"Events over time — service={service}", fontsize=12, y=1.01)
+    plt.tight_layout()
+    fname = (f"comparison_events_over_time_svc_{service}.png"
+             if service else "comparison_events_over_time.png")
+    fig.savefig(os.path.join(output_dir, fname), dpi=150)
+    plt.close(fig)
+    print(f"  Saved: {fname}")
+
+
 def discover_services(groups: list[dict]) -> list[str]:
     """Union of service IDs found in any seed's trace or system_metrics."""
     found: set[str] = set()
@@ -589,6 +656,7 @@ def main():
     plot_container_comparison(groups, labels, args.output_dir, smooth=args.smooth)
     plot_pool_targets(groups, labels, args.output_dir)
     plot_latency_cdf(groups, labels, args.output_dir)
+    plot_events_over_time(groups, labels, args.output_dir)
 
     # Per-service
     if args.services == "none":
@@ -605,6 +673,7 @@ def main():
                                   smooth=args.smooth, service=svc)
         plot_pool_targets(groups, labels, args.output_dir, service=svc)
         plot_latency_cdf(groups, labels, args.output_dir, service=svc)
+        plot_events_over_time(groups, labels, args.output_dir, service=svc)
 
     print(f"\nAll plots in {args.output_dir}/")
 

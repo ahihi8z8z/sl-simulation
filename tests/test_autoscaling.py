@@ -181,8 +181,8 @@ class TestAutoscalingAPI:
         autoscaler = OpenWhiskPoolAutoscaler(ctx)
         api = AutoscalingAPI(autoscaler)
 
-        # No timeout configured for "warm" → returns -1 (never).
-        assert api.get_idle_timeout("svc-a", "warm") == -1.0
+        # No timeout configured for "warm" → returns 0 (immediate evict).
+        assert api.get_idle_timeout("svc-a", "warm") == 0.0
         api.set_idle_timeout("svc-a", "warm", 10.0)
         assert api.get_idle_timeout("svc-a", "warm") == 10.0
 

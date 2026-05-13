@@ -353,8 +353,8 @@ class LifecycleManager:
         """Schedule an idle timeout check for this container.
 
         Timeout is looked up by the container's current state — different
-        states (warm, prewarm, ...) can have different timeouts.
-        Negative timeout → never evict from this state.
+        states (warm, prewarm, ...) can have different timeouts. Negative
+        timeout → never evict from this state (opt-in; default is 0).
         """
         if self.ctx.autoscaling_manager is None:
             return
@@ -362,7 +362,7 @@ class LifecycleManager:
             instance.service_id, instance.state,
         )
         if timeout < 0:
-            return  # never evict from this state
+            return  # explicit opt-out
         gen = instance._idle_timer_gen
         self.ctx.env.process(self._idle_timer(instance, timeout, gen))
 

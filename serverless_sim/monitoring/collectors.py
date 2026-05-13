@@ -209,12 +209,12 @@ class AutoscalingCollector(BaseCollector):
         for svc_id in ctx.workload_manager.services:
             # Pre-declare idle_timeout columns for every reachable state so the
             # streaming CSV header is stable from t=0 even if the policy sets
-            # timeouts dynamically only later. -1 = unset/never evict.
+            # timeouts dynamically only later. 0 = unset (immediate evict).
             timeouts = am.get_idle_timeouts(svc_id)
             chain_states = am._get_pool_states(svc_id) + ["warm"]
             for state in chain_states:
                 metrics[f"autoscaling.{svc_id}.idle_timeout.{state}"] = (
-                    timeouts.get(state, -1.0)
+                    timeouts.get(state, 0.0)
                 )
             for state, timeout in timeouts.items():
                 metrics[f"autoscaling.{svc_id}.idle_timeout.{state}"] = timeout
