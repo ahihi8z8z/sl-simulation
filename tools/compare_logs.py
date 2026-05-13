@@ -451,11 +451,22 @@ def plot_pool_targets(groups: list[dict], labels: list[str], output_dir: str,
         ax2 = None
         idle_cols_present = [c for c in idle_cols if c in hourly.columns]
         if idle_cols_present:
-            # Idle timeout is per-service config, not a sum; show the mean across services.
+            # Group per-state. Columns look like:
+            #   autoscaling.<svc>.idle_timeout.<state>  (per-state, new schema)
+            #   autoscaling.<svc>.idle_timeout          (legacy single-value)
+            by_state: dict[str, list[str]] = {}
+            for c in idle_cols_present:
+                parts = c.split(".idle_timeout")
+                state = parts[1].lstrip(".") if len(parts) > 1 and parts[1] else "all"
+                by_state.setdefault(state, []).append(c)
+
             ax2 = ax.twinx()
-            ax2.plot(time_hours, hourly[idle_cols_present].mean(axis=1).values / 60.0,
-                     color="#9C27B0", linewidth=1.2, alpha=0.8,
-                     linestyle="--", label="idle window")
+            state_colors = {"warm": "#9C27B0", "prewarm": "#00BCD4", "all": "#9C27B0"}
+            for state, cols in by_state.items():
+                ax2.plot(time_hours, hourly[cols].mean(axis=1).values / 60.0,
+                         color=state_colors.get(state, "#607D8B"),
+                         linewidth=1.2, alpha=0.85, linestyle="--",
+                         label=f"idle({state})")
             ax2.set_ylabel("Idle window (min)", fontsize=8)
             ax2.tick_params(axis="y", labelsize=7)
 
