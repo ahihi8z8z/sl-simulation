@@ -15,7 +15,7 @@ class Reactive:
     increment: int = 1
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, eq=False)  # identity hash: hashing the sample tuples dominated run time
 class Action:
     name: str
     kind: str
