@@ -7,10 +7,10 @@ APPS = ("gemma", "yolo")  # fixed order: also gives each app its own workload ra
 
 
 @dataclass(frozen=True)
-class Reactive:
-    min_count: int = 0
-    max_count: int = 1
-    ttl_s: float = 600.0
+class Reactive:  # ansible/files/runtimes.json nodejs:14 stem cell, used for gemma and yolo too
+    min_count: int = 1
+    max_count: int = 4
+    ttl_s: float = 120.0
     threshold: int = 1
     increment: int = 1
 
@@ -23,7 +23,7 @@ class Action:
     pod_start_s: float  # Null -> Warm CPU (stem cell ready)
     init_s: float       # Warm CPU -> Warm Model (/init) on a stem cell
     run_s: float        # Active (/run)
-    stem_cells: int = 1  # initialCount
+    stem_cells: int = 2  # initialCount
     reactive: Reactive = Reactive()
     init_cold_s: float | None = None  # /init right after a cold pod start; None = init_s
     # measured seconds to resample from; empty = use the constant above
