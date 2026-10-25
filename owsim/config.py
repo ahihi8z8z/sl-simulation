@@ -59,6 +59,8 @@ class Config:
     pause_grace_s: float = 10.0  # whisk.container-proxy.timeouts.pause-grace
     log_collect_s: float = 2.0  # after a run, before Ready: KubernetesContainer waits waitForLogs for the sentinel
     prewarm_ttl_s: float | None = None  # None = each stem cell's reactive ttl
+    prewarm_min_count: int | None = None  # None = each stem cell's reactive minCount
+    prewarm_max_count: int | None = None  # None = each stem cell's reactive maxCount
     prewarm_check_init_s: float = 1.0
     prewarm_check_s: float = 1.0
     prewarm_check_variance_s: float = 1.0

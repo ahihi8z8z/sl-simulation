@@ -27,6 +27,7 @@ class Invoker:
         self.svc_rng = {a: random.Random(rng.random()) for a in cfg.actions}
         self.pause_grace = cfg.pause_grace_s
         self.prewarm_ttl = cfg.prewarm_ttl_s
+        self.prewarm_min, self.prewarm_max = cfg.prewarm_min_count, cfg.prewarm_max_count
         self.free = []  # Ready containers, in the order they became free
         self.busy = []
         self.prewarm_starting = []
@@ -42,6 +43,7 @@ class Invoker:
         self.max_buffer = 0
         self.log = []  # policy decisions, like the invoker's lifecycle log lines
         self.prewarm_expired = 0
+        self.prewarm_removed = 0  # stem cells removed by a lowered min/max count
         self.cold_starts = {}  # per action since the last check (coldStartCount)
         self._ids = 0
         for a in cfg.actions:
@@ -172,17 +174,32 @@ class Invoker:
     def _ttl(self, p: Container):
         return self.prewarm_ttl if self.prewarm_ttl is not None else p.action.reactive.ttl_s
 
+    def _counts(self, a: Action, min_count=None, max_count=None):
+        """Effective (minCount, maxCount) of a stem cell under the given (default: current) overrides."""
+        lo = min_count if min_count is not None else self.prewarm_min
+        hi = max_count if max_count is not None else self.prewarm_max
+        return (lo if lo is not None else a.reactive.min_count, hi if hi is not None else a.reactive.max_count)
+
+    def _stems(self, a: Action):
+        return sum(p.action is a for p in self.prewarmed + self.prewarm_starting)
+
+    def _backfill(self):
+        """Non-scheduled adjust: start stem cells up to minCount."""
+        for a in self.cfg.actions:
+            for _ in range(self._counts(a)[0] - self._stems(a)):
+                self._start_prewarm(a)
+
     def _prewarm_check(self):
         yield self.env.timeout(self.cfg.prewarm_check_init_s)
         while True:
             expired = self._expire_prewarms()
             for a in self.cfg.actions:
                 r = a.reactive
-                want = r.min_count
+                lo, hi = self._counts(a)
+                want = lo
                 if a in self.cold_starts:
-                    want = min(max(r.min_count, self.cold_starts[a] // r.threshold * r.increment), r.max_count)
-                have = sum(p.action is a for p in self.prewarmed + self.prewarm_starting)
-                for _ in range(want - have):
+                    want = min(max(lo, self.cold_starts[a] // r.threshold * r.increment), hi)
+                for _ in range(want - self._stems(a)):
                     self._start_prewarm(a)
             self.cold_starts = {}
             if expired:
@@ -227,13 +244,50 @@ class Invoker:
         self._account()
         return dict(self.mem_s, total=sum(self.mem_s.values()))
 
-    def set_policy(self, pause_grace: float | None = None, prewarm_ttl: float | None = None):
-        """PATCH /lifecycle: None leaves a knob unchanged; both are validated before either is applied."""
+    def set_policy(self, pause_grace: float | None = None, prewarm_ttl: float | None = None,
+                   min_count: int | None = None, max_count: int | None = None):
+        """PATCH /lifecycle: None leaves a knob unchanged; all are validated before any is applied, then the
+        counts, the ttl and the pause grace are applied in that order."""
         if pause_grace is not None and pause_grace < 0:
             raise ValueError("pause_grace must be >= 0")
         if prewarm_ttl is not None and prewarm_ttl <= 0:
             raise ValueError("prewarm_ttl must be > 0")
+        if min_count is not None and min_count < 0 or max_count is not None and max_count < 1:
+            raise ValueError("min_count must be >= 0 and max_count >= 1")
+        for a in self.cfg.actions:
+            lo, hi = self._counts(a, min_count, max_count)
+            if lo > hi or a.reactive.increment > hi:
+                raise ValueError(f"counts {lo}/{hi} do not fit the stem cell of {a.name}")
         now = self.env.now
+        if min_count is not None or max_count is not None:
+            self.log.append(f"t={now:.1f} lifecycle_policy_updated field=prewarmCounts old_min={self.prewarm_min} "
+                            f"new_min={min_count if min_count is not None else self.prewarm_min} "
+                            f"old_max={self.prewarm_max} new_max={max_count if max_count is not None else self.prewarm_max}")
+            old = {a: self._counts(a) for a in self.cfg.actions}
+            if min_count is not None:
+                self.prewarm_min = min_count
+            if max_count is not None:
+                self.prewarm_max = max_count
+            removed = False
+            for a in self.cfg.actions:
+                (lo0, hi0), (lo, hi) = old[a], self._counts(a)
+                lowered = [c for c, c0 in ((lo, lo0), (hi, hi0)) if c < c0]
+                if not lowered:
+                    continue
+                # oldest started stem cells above the lowered count go; starting ones count but stay
+                started = sorted((p for p in self.prewarmed if p.action is a), key=lambda p: p.created_at)
+                starting = sum(p.action is a for p in self.prewarm_starting)
+                excess = started[:max(0, len(started) + starting - min(lowered))]
+                self._account()
+                for p in excess:
+                    self.prewarmed.remove(p)
+                    self.prewarm_removed += 1
+                    self.log.append(f"t={now:.1f} prewarm_retroactive_remove container={p.id} action={a.name} "
+                                    f"age={now - p.created_at:.1f} limit={min(lowered)}")
+                removed |= bool(excess)
+            self._backfill()
+            if removed:
+                self._retry_buffer()
         if prewarm_ttl is not None:
             self.log.append(f"t={now:.1f} lifecycle_policy_updated field=prewarmTtl old={self.prewarm_ttl} "
                             f"new={prewarm_ttl} prewarms={len(self.prewarmed)}")
@@ -244,10 +298,7 @@ class Invoker:
                                 f"age={now - p.created_at:.1f} ttl={prewarm_ttl}")
             if expired:
                 # non-scheduled backfill: only up to minCount, cold-start counts untouched
-                for a in self.cfg.actions:
-                    have = sum(p.action is a for p in self.prewarmed + self.prewarm_starting)
-                    for _ in range(a.reactive.min_count - have):
-                        self._start_prewarm(a)
+                self._backfill()
                 self._retry_buffer()
         if pause_grace is not None:
             self.log.append(f"t={now:.1f} lifecycle_policy_updated field=pauseGrace old={self.pause_grace} "
