@@ -61,9 +61,9 @@ class Config:
     prewarm_ttl_s: float | None = None  # None = each stem cell's reactive ttl
     prewarm_min_count: int | None = None  # None = each stem cell's reactive minCount
     prewarm_max_count: int | None = None  # None = each stem cell's reactive maxCount
-    prewarm_check_init_s: float = 1.0
-    prewarm_check_s: float = 1.0
-    prewarm_check_variance_s: float = 1.0
+    prewarm_check_init_s: float = 600.0  # whisk.container-pool.prewarm-expiration-check-* defaults
+    prewarm_check_s: float = 600.0
+    prewarm_check_variance_s: float = 10.0
     actions: tuple[Action, ...] = field(default_factory=lab_actions)
 
 
