@@ -45,7 +45,7 @@ class OwEnv(gym.Env):
         rng = random.Random(self.sim_seed * 1000 + APPS.index(a.name) + 1)  # as tools/run_fixed.simulate
         self.arrivals = []  # arrival times so far: requests the controller has already seen
         self.env.process(self._feed(a, trace_arrivals(rng, counts)))
-        self.t, self.n_rec, self.n_arr, self.mem = 0, 0, 0, 0.0
+        self.t, self.n_rec, self.n_arr, self.mem, self.used = 0, 0, 0, 0.0, 0.0
         return self._obs(0), {"day": self.day, "sim_seed": self.sim_seed}
 
     def _feed(self, a, times):
@@ -75,6 +75,9 @@ class OwEnv(gym.Env):
         mem = inv.memory_seconds()
         gbs = (mem["total"] - self.mem) / 1024
         self.mem = mem["total"]
+        used = inv.used_memory_seconds()["total"]
+        gbs_used = (used - self.used) / 1024  # used RAM (working set) GB*s of the step: reported, not in the reward
+        self.used = used
         latency = sum(r[3] for r in recs)
         done = self.t >= self.n_steps
         # requests seen but not started yet (buffer or startup): charge the wait so far, no future draws
@@ -82,7 +85,7 @@ class OwEnv(gym.Env):
         pending = [self.env.now - t for t in self.arrivals if t not in started] if done else []
         terminal = -(1 - self.alpha) * sum(pending) / self.l_ref
         reward = -(self.alpha * gbs / self.m_ref + (1 - self.alpha) * latency / self.l_ref) + terminal
-        info = {"gbs": gbs, "latency": latency, "started": len(recs), "requests": requests,
+        info = {"gbs": gbs, "gbs_used": gbs_used, "latency": latency, "started": len(recs), "requests": requests,
                 "classes": {c: sum(r[2] == c for r in recs) for c in ("warm", "prewarm", "cold", "recreated")},
                 "terminal_penalty": terminal, "pending": len(pending), "pending_wait": sum(pending)}
         return self._obs(requests), reward, done, False, info

@@ -31,6 +31,12 @@ class Action:
     init_samples: tuple[float, ...] = ()
     init_cold_samples: tuple[float, ...] = ()
     run_samples: tuple[float, ...] = ()
+    # used RAM (working set, MB) per phase: start (pod starting), stem (started stem cell), init (/init), run (/run and
+    # log collection), ready (warm idle); empty = the reservation memory_mb in every phase
+    ram_mb: dict = field(default_factory=dict)
+
+    def ram(self, phase: str) -> float:
+        return self.ram_mb.get(phase, self.memory_mb)
 
 
 def lab_actions(apps: tuple[str, ...] = APPS, calibration: str | None = CALIBRATION):
@@ -44,8 +50,8 @@ def lab_actions(apps: tuple[str, ...] = APPS, calibration: str | None = CALIBRAT
         cal = json.load(f)
     out = []
     for a in actions:
-        c = {k: tuple(v) for k, v in cal[a.name].items()}
-        out.append(replace(a, pod_start_s=sum(c["pod_start"]) / len(c["pod_start"]),
+        c = {k: tuple(v) for k, v in cal[a.name].items() if k != "ram_mb"}
+        out.append(replace(a, ram_mb=dict(cal[a.name].get("ram_mb", {})), pod_start_s=sum(c["pod_start"]) / len(c["pod_start"]),
                            init_s=sum(c["init_prewarm"]) / len(c["init_prewarm"]),
                            init_cold_s=sum(c["init_cold"]) / len(c["init_cold"]), run_s=sum(c["run"]) / len(c["run"]),
                            pod_start_samples=c["pod_start"], init_samples=c["init_prewarm"],
