@@ -17,6 +17,7 @@ class Container:
         self.ready_at = None
         self.last_used = None  # WarmedData.lastUsed: set when a run starts
         self.epoch = 0  # bumped when taken, so an older keep-alive timer is ignored
+        self.sched = None  # while busy: [(t_from, phase)] of the request it serves (start / init / run)
 
 
 class Invoker:
@@ -36,6 +37,7 @@ class Invoker:
         self.hash_order = False
         self.records = []  # (arrival, action, class, latency, queue wait)
         self.mem_s = {"ready": 0.0, "prewarmed": 0.0, "prewarm_starting": 0.0, "busy": 0.0}  # MB*s per state
+        self.used_s = {"start": 0.0, "stem": 0.0, "init": 0.0, "run": 0.0, "ready": 0.0}  # used MB*s per phase
         self._mem_t = 0.0
         self.removed = 0
         self.evicted = 0
@@ -66,6 +68,11 @@ class Invoker:
     def _dispatch(self, a: Action, t0: float, times: tuple):
         placed = self._place(a)
         if placed:
+            c, cls = placed
+            pod_start, init, _, init_cold = times
+            now = self.env.now  # the phases _run goes through, for the used-memory account only
+            c.sched = ([(now, "run")] if cls == "warm" else [(now, "init"), (now + init, "run")] if cls == "prewarm"
+                       else [(now, "start"), (now + pod_start, "init"), (now + pod_start + init_cold, "run")])
             self.env.process(self._run(a, t0, times, *placed))
         return placed is not None
 
@@ -233,16 +240,34 @@ class Invoker:
         return expired
 
     def _account(self):
-        """Add memory * time held in each state since the last change."""
-        dt = self.env.now - self._mem_t
-        self._mem_t = self.env.now
+        """Add memory * time held in each state since the last change: reserved (memory_mb) per pool state, and used
+        RAM per phase (a busy container's phase changes inside the interval, at the times in its sched)."""
+        t0, t1 = self._mem_t, self.env.now
+        dt = t1 - t0
+        self._mem_t = t1
         for state, pool in (("ready", self.free), ("prewarmed", self.prewarmed),
                             ("prewarm_starting", self.prewarm_starting), ("busy", self.busy)):
             self.mem_s[state] += dt * sum(c.action.memory_mb for c in pool)
+        if dt <= 0:
+            return
+        for phase, pool in (("ready", self.free), ("stem", self.prewarmed), ("start", self.prewarm_starting)):
+            self.used_s[phase] += dt * sum(c.action.ram(phase) for c in pool)
+        for c in self.busy:
+            sched = c.sched or [(t0, "run")]
+            for i, (lo, phase) in enumerate(sched):
+                hi = sched[i + 1][0] if i + 1 < len(sched) else t1
+                span = min(hi, t1) - max(lo, t0)
+                if span > 0:
+                    self.used_s[phase] += span * c.action.ram(phase)
 
     def memory_seconds(self):
         self._account()
         return dict(self.mem_s, total=sum(self.mem_s.values()))
+
+    def used_memory_seconds(self):
+        """Used RAM (working set) MB*s per phase, as the testbed's u_mem_used measures it."""
+        self._account()
+        return dict(self.used_s, total=sum(self.used_s.values()))
 
     def set_policy(self, pause_grace: float | None = None, prewarm_ttl: float | None = None,
                    min_count: int | None = None, max_count: int | None = None):
