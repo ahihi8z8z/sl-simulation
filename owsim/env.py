@@ -59,8 +59,11 @@ class OwEnv(gym.Env):
         return np.array([len(inv.free), len(inv.busy), len(inv.prewarmed) + len(inv.prewarm_starting),
                          len(inv.buffer), inv.pause_grace, inv.prewarm_ttl, requests], np.float32)
 
+    def _knobs(self, action):
+        return GRACES[action[0]], TTLS[action[1]]
+
     def step(self, action):
-        grace, ttl = GRACES[action[0]], TTLS[action[1]]
+        grace, ttl = self._knobs(action)
         inv = self.inv
         # PATCH only what changes: a no-op PATCH would still expire stem cells off the 1 s check
         inv.set_policy(pause_grace=grace if grace != inv.pause_grace else None,
