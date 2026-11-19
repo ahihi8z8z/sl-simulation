@@ -1,0 +1,180 @@
+\section{Multi-state Serverless Evaluation}
+\label{sec:evaluation}
+This section evaluates the KPIs of multi-state serverless deployments using our proposed Markov model. The results demonstrate how multi-state configurations through the manipulation of backward transition rates, and lifecycle definitions based on the number of states, impact KPIs.
+
+
+\subsection{Test Parameters}
+\label{subsec:eval:test}
+\begin{figure}[]
+    \centering
+\includegraphics[width=0.8\linewidth]{figures/evaluation/evaluated-lifecycle.pdf}
+    \caption{Evaluated ML use case's lifecycle with four states. Solid arrows carry the model rates: forward $\gamma_2, \gamma_3$ and backward $\theta_3, \theta_4$. The dashed transitions to and from Active are logical, i.e., request assignment and job completion, and thus carry no separate rate.} \label{fig:eval-lifecycle} 
+\end{figure}
+
+
+
+
+\begin{table}[!t]
+\caption{Evaluation test cases by controlling the backward rates $\theta_l, \text{ }l \in \{3,4\}$. $\infty$ means the rate is set to a big number.}
+\label{tab:cases}
+\centering
+\begin{tabular}{lcc}
+\toprule
+\text{Test Case} & ${\theta_3}$ & ${\theta_4}$ \\
+\midrule
+2-state ON & $\approx 0$ & $\approx 0$ \\
+2-state OFF & $\infty$ & $\infty$ \\
+3-state WC & $[0.01 - 1]$ & $\infty $\\
+3-state WM & $\infty$ & $[0.01 - 1] $\\
+4-state & $[0.01 - 1]$ & $[0.01 - 1]$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+The sample application follows the structure presented in the validation section~\ref{subsec:validation}, with a lifecycle encompassing four distinct states as illustrated in Figure~\ref{fig:eval-lifecycle} and a profile of each state and transient state described in Table~\ref{tab:profiles}. The two use cases are evaluated against four deployment strategies: 
+
+\begin{itemize}
+\item 2-state ON: Functions remain at the most-ready state regardless of incoming requests, a common strategy for ensuring high performance. This approach effectively reduces the lifecycle to only two states, WM and Active, as shown in Figure~\ref{fig:eval-lifecycle}. 
+
+\item 2-state OFF: Functions are terminated immediately after task completion, necessitating a cold start for each incoming request. This approach also utilizes two states, Null and Active, with a system operation model similar to the 2-state ON configuration. 
+
+\item 3-state WC: Functions operate following the container's lifecycle with three states: Null, WC, and Active. Only backward rate $\theta_3$ is controllable. The corresponding Markov model is presented in Figure~\ref{fig:markov-model-3}. 
+
+\item 3-state WM: Similar to 3-state WC but WM is set instead of WC. Thus, the lifecycle consists of: Null, WM, and Active. Only backward rate $\theta_4$ is controllable. This case represents works that cache one more state closer to Active~\cite{sui2024pre, pratap2025fine}.  
+
+\item 4-state: Functions operate in the full lifecycle with four states as illustrated in Figure~\ref{fig:eval-lifecycle}. Both backward rates $\theta_3$ and $\theta_4$ are controllable. 
+
+\end{itemize}
+
+In fact, 2-state and 3-state lifecycle can be realized by simply adjusting the backward transition rates $\theta_l$ in the 4-state lifecycle (Figure~\ref{fig:eval-lifecycle}) according to Table~\ref{tab:cases}. For the 3-state and 4-state cases, the backward rates $\theta_3$ and $\theta_4$ are configurable parameters that operators can tune to control the distribution of functions across intermediate states in the system. These adjustments directly impact the system's KPIs. To thoroughly examine this relationship, we analyze the impact of $\theta_l$ rates on KPIs by sampling $100$ values uniformly distributed within the specified range.
+
+\subsection{Backward Rate Impacts on KPIs}
+
+\begin{figure*}
+    \centering
+    \begin{subfigure}[b]{0.25\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/evaluation/3D-yolo_x-wm/block.pdf}
+        % \caption{}
+        \label{fig:3d-app-block}
+    \end{subfigure}
+    % \hfill
+    \begin{subfigure}[b]{0.25\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/evaluation/3D-yolo_x-wm/latency.pdf}
+        % \caption{Subfigure 2}
+        \label{fig:3d-app-latency}
+    \end{subfigure}
+    % \hfill
+    \begin{subfigure}[b]{0.25\textwidth}
+        \centering
+    \includegraphics[width=\textwidth]{figures/evaluation/3D-yolo_x-wm/ram.pdf}
+        % \caption{Subfigure 3}
+        \label{fig:3d-app-ram}
+    \end{subfigure}
+    
+    
+    \caption{System's KPIs vary with backward rate $\theta_4$ with profile: OD application. Best $\theta_4$ is the $\theta_4$ to achieve lowest value of each metric.}
+    \label{fig:3d-app}
+\end{figure*}
+
+In the first investigation, we analyze how the controllable backward rates $\theta_l$ quantitatively affect the KPIs. Specifically, we study $\theta_3$ in the 3-state WC case, $\theta_4$ in the 3-state WM case, and both $\theta_3$ and $\theta_4$ in the 4-state case. As the 4-state results exhibit a trend similar to the 3-state cases but are more complex due to the involvement of two variables, we showcase only the 3-state WM case for conciseness. Figure~\ref{fig:3d-app} shows the variation of our targeted metrics with different values of $\theta_4$ in the 3-state WM case. The different lines correspond to different arrival rates ($\lambda = 2, 8, 32$), chosen based on our observations to represent low, medium, and high traffic conditions.
+
+A low $\theta_4$ implies that functions are likely to remain at the warm-model state while idle, whereas a high $\theta_4$ indicates the opposite. As $\theta_4$ increases, functions tend to fall back to Null, making requests more likely to experience cold-start delays. Prolonged request durations also lead to faster saturation, increasing the likelihood of blocking new requests. Increasing the offered load worsens these effects. For blocking probability and startup latency, the best $\theta_4$ is the lowest value, keeping functions at warm model almost throughout idle periods.
+
+Conversely, the average RAM usage per request, $E[R_r]$, is high when $\theta_4$ is very low but drops significantly once $\theta_4$ exceeds a certain threshold, around $0.1$. This indicates that at low $\theta_4$, a large number of functions remain at warm model relative to actual demand, leading to RAM wastage. As $\theta_4$ increases, the number of idle functions decreases, reducing RAM usage. However, a very high $\theta_4$ leaves too few functions at warm model, increasing cold starts, which consume resources and cause a slight rise in RAM usage. The most RAM-efficient $\theta_4$ is therefore around $0.5$.
+
+This investigation shows that the backward rate significantly influences the system KPIs. For each metric, an optimal $\theta_4$ exists; however, no single $\theta_4$ simultaneously satisfies both performance and resource consumption, as improving one requires sacrificing the other. Nonetheless, the trade-off is non-linear. For example, at $\theta_4 = 0.1$, an increase of \SI{0.25}{\second} in startup latency cuts RAM consumption by \SI{40}{\percent} when $\lambda = 2$.
+
+
+\subsection{Number of States Impacts on KPIs}
+
+\begin{figure*}
+    \centering
+    \begin{subfigure}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/evaluation/yolo_x-app/block.pdf}
+        % \caption{}
+        \label{fig:light-app-block}
+    \end{subfigure}
+    % \hfill
+    \begin{subfigure}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/evaluation/yolo_x-app/latency.pdf}
+        % \caption{Subfigure 2}
+        \label{fig:light-app-latency}
+    \end{subfigure}
+    % \hfill
+    \begin{subfigure}[b]{0.23\textwidth}
+        \centering
+    \includegraphics[width=\textwidth]{figures/evaluation/yolo_x-app/ram.pdf}
+        % \caption{Subfigure 3}
+        \label{fig:light-app-ram}
+    \end{subfigure}
+    
+    \caption{System's KPIs vary with different $\lambda$ when the most RAM-efficient $\theta_3$ and $\theta_4$ are chosen. Profile: OD.}
+    \label{fig:light-app}
+\end{figure*}
+
+\begin{figure*}
+    \centering
+    \begin{subfigure}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/evaluation/llm_2b-app/block.pdf}
+        % \caption{}
+        \label{fig:medium-app-block}
+    \end{subfigure}
+    % \hfill
+    \begin{subfigure}[b]{0.23\textwidth}
+        \centering
+        \includegraphics[width=\textwidth]{figures/evaluation/llm_2b-app/latency.pdf}
+        % \caption{Subfigure 2}
+        \label{fig:medium-app-latency}
+    \end{subfigure}
+    % \hfill
+    \begin{subfigure}[b]{0.23\textwidth}
+        \centering
+    \includegraphics[width=\textwidth]{figures/evaluation/llm_2b-app/ram.pdf}
+        % \caption{Subfigure 3}
+        \label{fig:medium-app-ram}
+    \end{subfigure}
+    
+    \caption{System's KPIs vary with different $\lambda$ when the most RAM-efficient $\theta$ is chosen. Profile: LLM with Gemma-2-2b.}
+    \label{fig:medium-app}
+\end{figure*}
+
+
+
+
+In this investigation, we compare all four deployment cases listed in Sec.~\ref{subsec:eval:test} across a wide range of arrival rates. As the KPIs vary with the chosen values of $\theta_l$ in the 3-state and 4-state cases, we present the results for the most RAM-efficient pair of $\theta_3$ and $\theta_4$ to examine the impact of favoring computing resources over performance.
+
+Figure~\ref{fig:light-app} illustrates the KPIs of the OD application. The blocking probability of the 2-state OFF configuration is the highest. The 3-state WC case improves on this but remains much higher than 2-state ON, 3-state WM, and 4-state, whose lines overlap. This is because 2-state OFF and 3-state WC incur higher startup latency when requests arrive: higher startup latency means requests stay and occupy the system longer, increasing the likelihood of incoming requests encountering a busy system and being blocked. This effect is directly reflected in the startup latency result. As with blocking probability, the 2-state OFF case exhibits the worst latency. For 3-state WC, since the state before Active is WC, which requires \SI{3}{\second} to reach Active, its startup latency is capped at this value. Notably, introducing a state closer to Active, as in 3-state WM and 4-state, significantly enhances performance, with the latter slightly better than the former at low arrival rates ($2^0$ and $2^1$). In the 3-state and 4-state cases, startup latency at low arrival rates is higher than at high arrival rates, because at low arrival rates latency is traded off to achieve the lowest RAM. The 2-state ON achieves the best startup latency, as it keeps all functions at warm model while idle.
+
+Regarding the average RAM consumption per request, the 3-state WM and 4-state configurations show no difference and are the most efficient, while the 2-state ON configuration consumes the most RAM during low traffic ($\lambda < 2^2$) due to its policy of keeping all functions at warm model. However, as the request rate increases, 2-state ON utilizes resources more efficiently. The 3-state WC configuration consumes much less RAM than 2-state OFF, though more than 3-state WM, even though the WM state consumes more RAM than the WC state in the profile. This is due to the interplay of transient time: a function at WC consumes less RAM than at WM, but its startup time to Active is much higher, and this transient process also occupies RAM. Thus, from a system perspective, with a precisely selected $\theta_l$, having the WM state improves both the performance and resource utilization of the OD use case. The 4-state case, despite including both WM and WC states, shows no difference from 3-state WM, meaning that for the OD application the introduction of WC is redundant.
+
+Figure~\ref{fig:medium-app} presents the same KPIs for the LLM application. Compared to OD, LLM consumes less RAM and requires less time to transition between states, but has a much higher processing time during Active. Consequently, its offered load is dominated by processing time, leading to a similar blocking ratio across all cases. For startup latency, the ranking among cases is similar to OD. However, the improvement from the WM state is less significant here, and 4-state delivers better latency than 3-state WM, owing to the usefulness of the WC state in its lifecycle. Unlike in OD, the WC state in LLM consumes only one-fourth of the WM state while costing only \SI{0.68}{\second} to move to WM, which is negligible compared to the large processing time. This allows the 4-state case to reach the most RAM-efficient configuration while sacrificing less latency than 3-state WM. This indicates that for the LLM use case, both WC and WM contribute to the overall improvement in RAM and startup latency.
+
+\begin{figure}[]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figures/evaluation/pareto/llm_2b.pdf}
+	\caption{Pareto fronts of multi-state cases of LLM application when sweeping $\theta$ values in the evaluated range with fixed arrival rate of 1 req/s. The y-axis is on a log scale.}
+    \label{fig:pareto-llm}
+\end{figure}
+
+
+Figure~\ref{fig:pareto-llm} shows the Pareto fronts for the LLM profile, obtained by sweeping the backward rates $\theta_l$ over the evaluated range and retaining the non-dominated configurations. Each front represents the best latency–RAM trade-off, in which lower latency requires more RAM provisioning, and vice versa. Since the 2-state cases do not use $\theta_l$, they provide only single operating points at the edge of the operating region. The 4-state front does not cover the 3-state fronts because we intentionally use a separate sweep range for the 4-state case, although each 3-state case can be represented as a 4-state configuration with the omitted state's backward rate set to infinity, as described in Table~\ref{tab:cases}. For LLM, the 4-state deployment forms a clearly separated frontier below the 3-state frontier in the low-latency region. OD application also benefits from 4 states, but its frontier remains closer to the 3-state WM case. This difference comes from the relative benefit of the intermediate states. For LLM, the WC state retains much of the latency benefit at substantially lower memory cost, so adding it before WM creates a clearly better trade-off. For OD, model loading already accounts for most of the cold-start latency, so with the WM state alone can already capture much of the benefit. The additional WC state only provide a negligible improvement. Thus, the benefit of an intermediate state depends on both the state transition profile and container reuse. 
+
+
+
+With this result, the second research question RQ2 is addressed:  \textit{Introducing intermediate states, together with control of their backward rates $\theta_l$, transforms the deployment from a fixed operating point into a tunable trade-off region. Common ON--OFF 2-state configurations each admit only a single operating point. Every added state extends the Pareto front in the direction that this state favors, namely toward lower resource consumption or toward lower latency depending on where in the lifecycle it is placed. However, the extension is conditional on the application profile. A new
+state widens the front only if its own latency and resource operating
+point is not already dominated by the neighboring states. Otherwise,
+the system can reach the same or better trade-offs without it. Moreover,
+no number of states can improve both objectives simultaneously. Along the
+front, gaining in one metric sacrifices the other. The trade-off is
+nonetheless non-linear, so there exists configurations where a small concession
+in one metric yields a substantial gain in the other.}
+
+
+ 
