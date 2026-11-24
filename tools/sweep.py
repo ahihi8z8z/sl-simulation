@@ -37,7 +37,8 @@ def fit(a):
 
 class Markov(Theory):
     """The paper's 4-state lifecycle as a simulation: Poisson arrivals, transition and service times from
-    the log-normal fitted to the profile samples, and idle containers that fall back WM -> WC at rate theta4 and WC -> Null at rate theta3 (inf = at once)."""
+    the log-normal fitted to the profile samples, and idle containers that fall back WM -> WC after a fixed
+    1/theta4 and WC -> Null after a fixed 1/theta3 (inf = at once), as sl-sim-lite's statesweep maps the rate."""
 
     def __init__(self, env, cfg, rng, theta3, theta4):
         super().__init__(env, cfg, rng)
@@ -52,7 +53,7 @@ class Markov(Theory):
 
     def idle_time(self, c):
         theta = self.theta[c.state]
-        return 0.0 if theta == INF else self.rng.expovariate(theta)
+        return 0.0 if theta == INF else 1.0 / theta
 
     # One app and up to 60 containers: count slots and add up used RAM without walking the pools. A request's
     # startup and run RAM x time is added when it is placed, an idle pool's as time passes.
