@@ -20,7 +20,7 @@ PROFILES = {k: lab_actions((v,))[0] for k, v in APPS.items()}
 RATES = {"llm_2b": [2.0 ** k for k in range(-8, 1)], "yolo_x": [2.0 ** k for k in range(-2, 7)]}
 ON = 0.001  # the "theta ~ 0" of the 2-state ON case
 FIELDS = ["app", "case", "rate", "theta3", "theta4", "seed", "duration_s", "requests", "served", "queued",
-          "wait_s", "latency_s", "ram_gbs_per_req", "cold", "prewarm", "warm"]
+          "wait_s", "latency_s", "latency_p95_s", "ram_gbs_per_req", "cold", "prewarm", "warm"]
 
 PHASES = ("pod_start", "init_prewarm", "run", "init_cold")  # the order of a job's times
 
@@ -118,9 +118,10 @@ def run(point):
     recs = p.records[r0:]
     reqs, served = len(p.arrivals) - n0, len(recs)
     cls = [r[2] for r in recs]
+    lat = sorted(r[3] for r in recs)
     return dict(app=app, case=case, rate=rate, theta3=theta3, theta4=theta4, seed=seed, duration_s=duration,
                 requests=reqs, served=served, queued=len(p.queue), wait_s=sum(r[4] for r in recs) / served,
-                latency_s=sum(r[3] for r in recs) / served,
+                latency_s=sum(lat) / served, latency_p95_s=lat[min(served - 1, int(0.95 * served))],
                 ram_gbs_per_req=(p.used_memory_seconds()["total"] - m0) / 1024 / served,
                 cold=cls.count("cold"), prewarm=cls.count("prewarm"), warm=cls.count("warm"))
 

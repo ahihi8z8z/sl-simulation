@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
 # the paper's figures: file name, results column, axis label
-KPIS = [("wait", "wait_s", "Queue wait (s)"), ("latency", "latency_s", "Startup latency (s)"),
+KPIS = [("p95", "latency_p95_s", "p95 latency (s)"), ("latency", "latency_s", "Latency (s)"),
         ("ram", "ram_gbs_per_req", "RAM Per Request (GB·s)")]
 # case, label, line and marker as in the paper
 CASES = [("2-state ON", "2-states ON", dict(color="tab:blue", ls="--", marker="s")),
@@ -109,7 +109,7 @@ def pareto(rows, out, app, rate):
     ax.set_yscale("log")
     ax.yaxis.set_major_formatter(FuncFormatter(lambda y, _: f"{y:g}"))
     ax.set_xlabel("RAM Per Request (GB·s)", fontsize=13)
-    ax.set_ylabel("Startup latency (s)", fontsize=13)
+    ax.set_ylabel("Latency (s)", fontsize=13)
     ax.tick_params(labelsize=11)
     ax.grid(True)
     ax.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, frameon=False, fontsize=10)
@@ -131,9 +131,9 @@ def main():
         pareto(rows, out, app, 0.25)  # the paper: 1 req/s on 60 containers
         with open(os.path.join(args.dir, f"best_ram_{app}.csv"), "w", newline="") as f:  # the plotted points
             w = csv.writer(f)
-            w.writerow(["case", "rate", "theta3", "theta4", "wait_s", "latency_s", "ram_gbs_per_req"])
+            w.writerow(["case", "rate", "theta3", "theta4", "latency_p95_s", "latency_s", "ram_gbs_per_req"])
             for (case, rate), r in sorted(best.items()):
-                w.writerow([case, rate, r["theta3"], r["theta4"], r["wait_s"], r["latency_s"], r["ram_gbs_per_req"]])
+                w.writerow([case, rate, r["theta3"], r["theta4"], r["latency_p95_s"], r["latency_s"], r["ram_gbs_per_req"]])
     print(f"figures in {out}")
 
 
