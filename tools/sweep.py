@@ -19,8 +19,8 @@ PROFILES = {k: lab_actions((v,))[0] for k, v in APPS.items()}
 # the paper's arrival rates divided by 4, as the system is 4 times smaller: the same load per container
 RATES = {"llm_2b": [2.0 ** k for k in range(-8, 1)], "yolo_x": [2.0 ** k for k in range(-2, 7)]}
 ON = 0.001  # the "theta ~ 0" of the 2-state ON case
-FIELDS = ["app", "case", "rate", "theta3", "theta4", "seed", "duration_s", "requests", "blocked", "served",
-          "block_prob", "latency_s", "ram_gbs_per_req", "cold", "prewarm", "warm"]
+FIELDS = ["app", "case", "rate", "theta3", "theta4", "seed", "duration_s", "requests", "served", "queued",
+          "wait_s", "latency_s", "ram_gbs_per_req", "cold", "prewarm", "warm"]
 
 PHASES = ("pod_start", "init_prewarm", "run", "init_cold")  # the order of a job's times
 
@@ -50,9 +50,9 @@ class Markov(Theory):
         r = self.svc_rng[a]
         return a, self.env.now, tuple(r.lognormvariate(*self.fit[p]) for p in PHASES)
 
-    def on_idle(self, c):
+    def idle_time(self, c):
         theta = self.theta[c.state]
-        self.arm(c, 0.0 if theta == INF else self.rng.expovariate(theta))
+        return 0.0 if theta == INF else self.rng.expovariate(theta)
 
     # One app and up to 60 containers: count slots and add up used RAM without walking the pools. A request's
     # startup and run RAM x time is added when it is placed, an idle pool's as time passes.
@@ -113,13 +113,13 @@ def run(point):
     duration = max(requests / rate, turnovers * slow)
     warmup = max(0.1 * duration, 3 * slow)
     env.run(until=warmup)
-    n0, r0, b0, m0 = len(p.arrivals), len(p.records), p.blocked, p.used_memory_seconds()["total"]
+    n0, r0, m0 = len(p.arrivals), len(p.records), p.used_memory_seconds()["total"]
     env.run(until=warmup + duration)
     recs = p.records[r0:]
-    reqs, blocked, served = len(p.arrivals) - n0, p.blocked - b0, len(recs)
+    reqs, served = len(p.arrivals) - n0, len(recs)
     cls = [r[2] for r in recs]
     return dict(app=app, case=case, rate=rate, theta3=theta3, theta4=theta4, seed=seed, duration_s=duration,
-                requests=reqs, blocked=blocked, served=served, block_prob=blocked / reqs,
+                requests=reqs, served=served, queued=len(p.queue), wait_s=sum(r[4] for r in recs) / served,
                 latency_s=sum(r[3] for r in recs) / served,
                 ram_gbs_per_req=(p.used_memory_seconds()["total"] - m0) / 1024 / served,
                 cold=cls.count("cold"), prewarm=cls.count("prewarm"), warm=cls.count("warm"))
